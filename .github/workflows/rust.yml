@@ -1,0 +1,26 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+        
+    - name: Toolchain(info)
+      run: |
+        cargo --version --verbose
+        rustc --version
+    
+    - name: Print(target-features)
+      run: rustc --print target-features
+
+    - name: Test
+      run: cargo test --all-targets

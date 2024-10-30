@@ -1,0 +1,17 @@
+[package]
+name = "utf-c"
+version = "0.1.0"
+authors = ["Nick Ilhan Atamgüc <nickatamguec@outlook.com>"]
+edition = "2021"
+description = "A very small and simple compression for short UTF-8 texts"
+repository = "https://github.com/utf-c/rust"
+license = "MIT"
+keywords = ["utf", "utf8", "utf-8", "utf-c", "compression"]
+categories = ["compression"]
+exclude = [".github/", ".cargo/"]
+
+[dependencies]
+
+[features]
+default = ["simd"]
+simd = []

@@ -1,0 +1,3 @@
+[build]
+# "-C", "target-feature=-sse2,-avx2"
+rustflags = ["--emit=llvm-ir"]
