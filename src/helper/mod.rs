@@ -3,44 +3,18 @@ mod simd;
 
 /// This function checks whether the haystack consists only of ASCII characters.
 pub fn only_ascii(haystack: &[u8]) -> bool {
-    #[cfg(all(
-        feature="simd", 
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        any(target_feature = "avx2", target_feature = "sse2")
-    ))]
+    #[cfg(feature = "simd")]
     return unsafe { simd::next_non_ascii_pos(haystack) }.is_none();
 
-    #[cfg(any(
-        not(feature="simd"), 
-        all(
-            feature="simd",
-            not(all(
-                any(target_arch = "x86", target_arch = "x86_64"),
-                any(target_feature = "avx2", target_feature = "sse2")
-            ))
-        )
-    ))]
+    #[cfg(not(feature = "simd"))]
     return haystack.iter().all(|b| *b & 0b10000000 == 0);
 }
 
 pub(crate) fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
-    #[cfg(all(
-        feature="simd", 
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        any(target_feature = "avx2", target_feature = "sse2")
-    ))]
+    #[cfg(feature = "simd")]
     return unsafe { simd::next_non_ascii_pos(haystack) };
 
-    #[cfg(any(
-        not(feature="simd"), 
-        all(
-            feature="simd",
-            not(all(
-                any(target_arch = "x86", target_arch = "x86_64"),
-                any(target_feature = "avx2", target_feature = "sse2")
-            ))
-        )
-    ))]
+    #[cfg(not(feature = "simd"))]
     return haystack.iter().position(|b| *b & 0b10000000 != 0);
 }
 
