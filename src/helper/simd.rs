@@ -2,10 +2,12 @@
 use std::arch::x86;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64 as x86;
+#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
+use core::arch::aarch64 as arm;
 
 #[cfg(not(any(
     any(target_arch = "x86", target_arch = "x86_64"),
-    any(target_arch = "arm", target_arch = "aarch64", target_arch = "arm64ec"),
+    any(target_arch = "aarch64", target_arch = "arm64ec"),
 )))]
 compile_error!("The current arch is not supported. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
@@ -15,9 +17,9 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
         any(target_arch = "x86", target_arch = "x86_64"), 
         any(target_feature = "avx2", target_feature = "sse2"),
     ), 
-    // arm | aarch64 | arm64ec
+    // aarch64 | arm64ec
     all(
-        any(target_arch = "arm", target_arch = "aarch64", target_arch = "arm64ec"), 
+        any(target_arch = "aarch64", target_arch = "arm64ec"), 
         target_feature = "neon",
     ),
 )))]
@@ -93,9 +95,32 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         }
     }
 
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64", target_arch = "arm64ec"))]
+    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
     {
-        // TODO
+        #[cfg(target_feature = "neon")]
+        // The following code will only be added if the feature is supported at compile time, otherwise this code will be executed slowly.
+        if haystack.len() >= 16 {
+            // Here we check during runtime whether this feature is supported by the currently used processor.
+            if std::arch::is_aarch64_feature_detected!("neon") {
+                let block_count = haystack.len() / 16;
+                remainder = 16 * block_count;
+    
+                // Create a NEON vector filled with the pattern
+                let pattern_vec = arm::vdupq_n_u8(NEEDLE);
+    
+                for i in (0..remainder).step_by(16) {
+                    let chunk = haystack.as_ptr().add(i);
+    
+                    // Load the current chunk into a NEON vector
+                    let chunk_vec = arm::vld1q_u8(chunk);
+    
+                    // Compare each byte in the chunk with the pattern
+                    let cmp_result = arm::vandq_u8(chunk_vec, pattern_vec);
+    
+                    // ... ?
+                }
+            }
+        }
     }
 
     haystack.iter().skip(remainder).position(|b| *b & NEEDLE != 0)
