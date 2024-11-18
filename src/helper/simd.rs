@@ -26,8 +26,13 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
 compile_error!("The required features for SIMD are not available. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
 pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
+    // The needle indicates what we are looking for.
+    // We are looking for a byte where the first bit is set.
+    // (ASCII has a value of 0-127, which means that the first bit is never set)
     const NEEDLE: u8 = 0b10000000;
 
+    // Depending on the feature used, the remainder indicates how many bytes
+    // have already been checked and can be skipped if we reach the end of this function.
     let mut remainder = 0;
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -40,22 +45,16 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
                 let block_count = haystack.len() / 32;
                 remainder = 32 * block_count;
 
-                // Create a SIMD vector filled with the pattern
-                let pattern_vec = x86::_mm256_set1_epi8(NEEDLE as i8);
-
                 for i in (0..remainder).step_by(32) {
-                    let chunk = haystack.as_ptr().add(i);
+                    let chunk_ptr = haystack.as_ptr().add(i);
 
-                    // Load the current chunk into a SIMD vector
-                    let chunk_vec = x86::_mm256_loadu_si256(chunk as *const x86::__m256i);
+                    // Load the current chunk into a SIMD vector.
+                    let simd_vec = x86::_mm256_loadu_si256(chunk_ptr as *const x86::__m256i);
 
-                    // Compare each byte in the chunk with the pattern
-                    let cmp_result = x86::_mm256_and_si256(chunk_vec, pattern_vec);
-
-                    // Check if any byte matches
-                    let mask = x86::_mm256_movemask_epi8(cmp_result);
+                    // Check if any byte matches.
+                    let mask = x86::_mm256_movemask_epi8(simd_vec);
                     if mask != 0 {
-                        // We have found a non-ASCII character
+                        // We have found a non-ASCII character.
                         let pos = i + (mask.trailing_zeros() as usize);
                         return Some(pos);
                     }
@@ -71,22 +70,16 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
                 let block_count = haystack.len() / 16;
                 remainder = 16 * block_count;
 
-                // Create a SIMD vector filled with the pattern
-                let pattern_vec = x86::_mm_set1_epi8(NEEDLE as i8);
-
                 for i in (0..remainder).step_by(16) {
-                    let chunk = haystack.as_ptr().add(i);
+                    let chunk_ptr = haystack.as_ptr().add(i);
 
-                    // Load the current chunk into a SIMD vector
-                    let chunk_vec = x86::_mm_loadu_si128(chunk as *const x86::__m128i);
+                    // Load the current chunk into a SIMD vector.
+                    let simd_vec = x86::_mm_loadu_si128(chunk_ptr as *const x86::__m128i);
 
-                    // Compare each byte in the chunk with the pattern
-                    let cmp_result = x86::_mm_and_si128(chunk_vec, pattern_vec);
-
-                    // Check if any byte matches
-                    let mask = x86::_mm_movemask_epi8(cmp_result);
+                    // Check if any byte matches.
+                    let mask = x86::_mm_movemask_epi8(simd_vec);
                     if mask != 0 {
-                        // We have found a non-ASCII character
+                        // We have found a non-ASCII character.
                         let pos = i + (mask.trailing_zeros() as usize);
                         return Some(pos);
                     }
@@ -105,20 +98,14 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
                 let block_count = haystack.len() / 16;
                 remainder = 16 * block_count;
     
-                // Create a SIMD vector filled with the pattern.
-                let pattern_vec = arm::vdupq_n_u8(NEEDLE);
-    
                 for i in (0..remainder).step_by(16) {
-                    let chunk = haystack.as_ptr().add(i);
+                    let chunk_ptr = haystack.as_ptr().add(i);
     
                     // Load the current chunk into a SIMD vector.
-                    let chunk_vec = arm::vld1q_u8(chunk);
-    
-                    // Compare each byte in the chunk with the pattern.
-                    let cmp_result = arm::vandq_u8(chunk_vec, pattern_vec);
+                    let simd_vec = arm::vld1q_u8(chunk_ptr);
     
                     // Check if any byte matches.
-                    let mask = neon_movemask_epu8(cmp_result);
+                    let mask = neon_movemask_epu8(simd_vec);
                     if mask != 0 {
                         // We have found a non-ASCII character.
                         let pos = i + (mask.trailing_zeros() as usize);
@@ -128,8 +115,11 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
             }
         }
     }
-
-    haystack.iter().skip(remainder).position(|b| *b & NEEDLE != 0)
+    
+    // Search the remaining bytes for the needle.
+    haystack.iter()
+        .skip(remainder)
+        .position(|b| *b & NEEDLE != 0)
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
