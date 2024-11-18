@@ -18,7 +18,7 @@ pub enum CharSetType<'a> {
 impl<'a> CharSetType<'a> {
     #[inline]
     pub fn len(&self) -> usize {
-        match self {
+        match *self {
             Self::Unknown => 0,
             Self::Unicode00000_0007f => 1,
             Self::Unicode00080_007ff(_) => 2,
@@ -31,19 +31,21 @@ impl<'a> CharSetType<'a> {
     pub fn set(&self) -> &'a [u8] {
         match *self {
             Self::Unknown | Self::Unicode00000_0007f => unreachable!(),
-            Self::Unicode00080_007ff(v) => &v[0..1],
-            Self::Unicode00800_0ffff(v) => &v[0..2],
-            Self::Unicode10000_1ffff(v) => &v[0..3],
+            // We can use `unsafe { v.get_unchecked(...) }`, because we know the length.
+            Self::Unicode00080_007ff(v) => unsafe { v.get_unchecked(0..1) },
+            Self::Unicode00800_0ffff(v) => unsafe { v.get_unchecked(0..2) },
+            Self::Unicode10000_1ffff(v) => unsafe { v.get_unchecked(0..3) },
         }
     }
 
     #[inline]
-    pub fn value(self) -> u8 {
-        match self {
+    pub fn value(&self) -> u8 {
+        match *self {
             Self::Unknown | Self::Unicode00000_0007f => unreachable!(),
-            Self::Unicode00080_007ff(v) => v[1],
-            Self::Unicode00800_0ffff(v) => v[2],
-            Self::Unicode10000_1ffff(v) => v[3],
+            // We can use `unsafe { *v.get_unchecked(...) }`, because we know the length.
+            Self::Unicode00080_007ff(v) => unsafe { *v.get_unchecked(1) },
+            Self::Unicode00800_0ffff(v) => unsafe { *v.get_unchecked(2) },
+            Self::Unicode10000_1ffff(v) => unsafe { *v.get_unchecked(3) },
         }
     }
 }
@@ -56,7 +58,7 @@ impl<'a> From<&'a [u8]> for CharSetType<'a> {
             3.. if is_unicode00800_0ffff(value) => Self::Unicode00800_0ffff(&value[0..=2]),
             2.. if is_unicode00080_007ff(value) => Self::Unicode00080_007ff(&value[0..=1]),
             1.. if is_unicode00000_0007f(value) => Self::Unicode00000_0007f,
-            _ => Self::Unknown 
+            _ => Self::Unknown,
         }
     }
 }
