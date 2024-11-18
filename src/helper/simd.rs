@@ -105,23 +105,64 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
                 let block_count = haystack.len() / 16;
                 remainder = 16 * block_count;
     
-                // Create a NEON vector filled with the pattern
+                // Create a SIMD vector filled with the pattern.
                 let pattern_vec = arm::vdupq_n_u8(NEEDLE);
     
                 for i in (0..remainder).step_by(16) {
                     let chunk = haystack.as_ptr().add(i);
     
-                    // Load the current chunk into a NEON vector
+                    // Load the current chunk into a SIMD vector.
                     let chunk_vec = arm::vld1q_u8(chunk);
     
-                    // Compare each byte in the chunk with the pattern
+                    // Compare each byte in the chunk with the pattern.
                     let cmp_result = arm::vandq_u8(chunk_vec, pattern_vec);
     
-                    // ... ?
+                    // Check if any byte matches.
+                    let mask = neon_movemask_epu8(cmp_result);
+                    if mask != 0 {
+                        // We have found a non-ASCII character.
+                        let pos = i + (mask.trailing_zeros() as usize);
+                        return Some(pos);
+                    }
                 }
             }
         }
     }
 
     haystack.iter().skip(remainder).position(|b| *b & NEEDLE != 0)
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
+#[cfg(target_feature = "neon")]
+/// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
+unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
+    // Shift each u8 element in `value` 7 bits to the right (preserving the sign bit)
+    // and then reinterpret `shift_u8` (vector of 16x-u8) as a vector of 8x-u16.
+    let shift_u8 = arm::vshrq_n_u8(value, 7);
+    let vec_8x16 = arm::vreinterpretq_u16_u8(shift_u8);
+
+    // Shift (and accumulate) each u16 element in `vec_8x16` 7 bits to the right 
+    // and then reinterpret `shift_u16` (vector of 8x-u16) as a vector of 4x-u32.
+    let shift_u16 = arm::vsraq_n_u16(vec_8x16, vec_8x16, 7);
+    let vec_4x32 = arm::vreinterpretq_u32_u16(shift_u16);
+
+    // Shift (and accumulate) each u32 element in `vec_4x32` 14 bits to the right 
+    // and then reinterpret `shift_u32` (vector of 4x-u32) as a vector of 2x-u64.
+    let shift_u32 = arm::vsraq_n_u32(vec_4x32, vec_4x32, 14);
+    let vec_2x64 = arm::vreinterpretq_u64_u32(shift_u32);
+
+    // Shift (and accumulate) each u64 element in `vec_2x64` 28 bits to the right 
+    // and then reinterpret `shift_u64` (vector of 2x-u64) as a vector of 16x-u8.
+    let shift_u64 = arm::vsraq_n_u64(vec_2x64, vec_2x64, 28);
+    let vec_16x8 = arm::vreinterpretq_u8_u64(shift_u64);
+    // Our result is now in the first and ninth element of `vec_16x8` as "low" and "high".
+
+    // Get our "low" and "high" element from `vec_16x8` as u8 data type.
+    let (low, high): (u8, u8) = (
+        arm::vgetq_lane_u8(vec_16x8, 0),
+        arm::vgetq_lane_u8(vec_16x8, 8),
+    );
+    
+    // Our final result:
+    ((high as u16) << 8) | (low as u16)
 }
