@@ -120,6 +120,7 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
     haystack.iter()
         .skip(remainder)
         .position(|b| *b & NEEDLE != 0)
+        .map(|result| remainder + result)
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
