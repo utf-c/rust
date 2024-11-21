@@ -6,21 +6,33 @@ use char_set::CharSetType;
 /// Returns `false` if all characters are ASCII, otherwise `true`.
 #[inline]
 fn _is_ascii_then(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
-    // Now check up to which position it is no longer an ASCII character
+    // Now check up to which position it is no longer an ASCII character.
     if let Some(next_pos) = helper::next_non_ascii_pos(value) {
-        // Position found, now add all bytes up to this position and continue the loop
+        // Position found, now add all bytes up to this position and continue the loop.
         result.extend_from_slice(&value[..next_pos]);
         *value = &value[next_pos..];
         return true;
     }
 
-    // No non-ASCII character found, so all remaining characters are ASCII characters
+    // No non-ASCII character found, so all remaining characters are ASCII characters.
     result.extend_from_slice(value);
     false
 }
 
-pub fn compress(mut value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
-    let mut result = Vec::<u8>::with_capacity(value.len());
+pub fn compress<T>(buf: T) -> Result<Vec<u8>, Vec<u8>> 
+where 
+    T: AsRef<[u8]>, 
+{
+    let mut value = buf.as_ref();
+    let value_len = value.len();
+    let value_len_count = value_len / (u8::MAX as usize);
+
+    let mut result = Vec::<u8>::with_capacity(1 + value_len_count + value_len);
+    if value_len_count > 0 {
+        result.extend(vec![u8::MAX; value_len_count]);
+    }
+    let value_len_remainder = value_len - ((u8::MAX as usize) * value_len_count);
+    result.push(value_len_remainder as u8);
 
     let mut last_set: &[u8] = &[];
 
@@ -28,7 +40,7 @@ pub fn compress(mut value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
         let cst = CharSetType::from(value);
 
         if cst == CharSetType::Unknown {
-            // We found a non-ASCII character with an invalid or missing set
+            // We found a non-ASCII character with an invalid or missing set.
             let err_result = value.iter().take(char_set::C_MAX_LEN).copied().collect::<Vec<u8>>();
             return Err(err_result);
         }
@@ -53,8 +65,24 @@ pub fn compress(mut value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
     Ok(result)
 }
 
-pub fn decompress(mut value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
-    let mut result = Vec::<u8>::with_capacity(value.len());
+pub fn decompress<T>(buf: T) -> Result<Vec<u8>, Vec<u8>> 
+where 
+    T: AsRef<[u8]>, 
+{
+    let mut value = buf.as_ref();
+    let mut value_len = 0;
+    for i in 0..usize::MAX {
+        let len = value[i];
+
+        value_len += len as usize;
+
+        if len < u8::MAX {
+            value = &value[(i + 1)..];
+            break;
+        }
+    }
+
+    let mut result = Vec::<u8>::with_capacity(value_len);
 
     let mut last_set: &[u8] = &[];
 
@@ -99,49 +127,56 @@ pub fn decompress(mut value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    const RESULTS: [(&str, &[u8], &[u8]); 6] = [
+    const RESULTS: [(&str, &[u8], &[u8]); 7] = [
         (
-            "Hello",
-            // UNCOMPRESSED(5)
-            &[72, 101, 108, 108, 111],
+            "",
+            // UNCOMPRESSED(0)
+            &[],
+            // COMPRESSED(1)
+            &[0],
+        ),
+        (
+            "H",
+            // UNCOMPRESSED(1)
+            &[   72],
+            // COMPRESSED(1)
+            &[1, 72],
+        ),
+        (
+            "HΉ",
+            // UNCOMPRESSED(3)
+            &[   72, 206, 137],
+            // COMPRESSED(4)
+            &[3, 72, 206, 137],
+        ),
+        (
+            "HΉH",
+            // UNCOMPRESSED(4)
+            &[   72, 206, 137, 72],
             // COMPRESSED(5)
-            &[72, 101, 108, 108, 111]
+            &[4, 72, 206, 137, 72],
         ),
         (
-            "Hello ÑÍÇ½",
-            // UNCOMPRESSED(14)
-            &[72, 101, 108, 108, 111, 32, 195, 145, 195, 141, 195, 135, 194, 189],
-            // COMPRESSED(12)
-            &[72, 101, 108, 108, 111, 32, 195, 145,      141,      135, 194, 189]
+            "HΉHΉ",
+            // UNCOMPRESSED(6)
+            &[   72, 206, 137, 72, 206, 137],
+            // COMPRESSED(7)
+            &[6, 72, 206, 137, 72,      137],
         ),
         (
-            "Hello ÑÍÇ½ Hello",
-            // UNCOMPRESSED(20)
-            &[72, 101, 108, 108, 111, 32, 195, 145, 195, 141, 195, 135, 194, 189, 32, 72, 101, 108, 108, 111],
-            // COMPRESSED(18)
-            &[72, 101, 108, 108, 111, 32, 195, 145,      141,      135, 194, 189, 32, 72, 101, 108, 108, 111]
+            "ΉΉΉΉ",
+            // UNCOMPRESSED(8)
+            &[   206, 137, 206, 137, 206, 137, 206, 137],
+            // COMPRESSED(6)
+            &[8, 206, 137,      137,      137,      137],
         ),
         (
-            "Hello ÑÍÇ½ Hello ÑÍÇ½",
-            // UNCOMPRESSED(29)
-            &[72, 101, 108, 108, 111, 32, 195, 145, 195, 141, 195, 135, 194, 189, 32, 72, 101, 108, 108, 111, 32, 195, 145, 195, 141, 195, 135, 194, 189],
-            // COMPRESSED(25)
-            &[72, 101, 108, 108, 111, 32, 195, 145,      141,      135, 194, 189, 32, 72, 101, 108, 108, 111, 32, 195, 145,      141,      135, 194, 189]
+            "זו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הודעהזו הוהודעה",
+            // UNCOMPRESSED(259)
+            &[        215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148, 215, 150, 215, 149, 32, 215, 148, 215, 149, 215, 148, 215, 149, 215, 147, 215, 162, 215, 148],
+            // COMPRESSED(141)
+            &[255, 4, 215, 150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      147,      162,      148,      150,      149, 32,      148,      149,      148,      149,      147,      162,      148],
         ),
-        (
-            "Ήταν μια πολύ καλή μέρα.",
-            // UNCOMPRESSED(43)
-            &[206, 137, 207, 132, 206, 177, 206, 189, 32, 206, 188, 206, 185, 206, 177, 32, 207, 128, 206, 191, 206, 187, 207, 141, 32, 206, 186, 206, 177, 206, 187, 206, 174, 32, 206, 188, 206, 173, 207, 129, 206, 177, 46],
-            // COMPRESSED(33)
-            &[206, 137, 207, 132, 206, 177,      189, 32,      188,      185,      177, 32, 207, 128, 206, 191,      187, 207, 141, 32, 206, 186,      177,      187,      174, 32,      188,      173, 207, 129, 206, 177, 46],
-        ),
-        (
-            "The Symbols ﹩﹫﹪ are not $@%",
-            // UNCOMPRESSED(33)
-            &[84, 104, 101, 32, 83, 121, 109, 98, 111, 108, 115, 32, 239, 185, 169, 239, 185, 171, 239, 185, 170, 32, 97, 114, 101, 32, 110, 111, 116, 32, 36, 64, 37],
-            // COMPRESSED(29)
-            &[84, 104, 101, 32, 83, 121, 109, 98, 111, 108, 115, 32, 239, 185, 169,           171,           170, 32, 97, 114, 101, 32, 110, 111, 116, 32, 36, 64, 37]
-        )
     ];
 
     #[test]
