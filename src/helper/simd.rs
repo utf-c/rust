@@ -6,18 +6,18 @@ use std::arch::x86_64 as x86;
 use core::arch::aarch64 as arm;
 
 #[cfg(not(any(
-    any(target_arch = "x86", target_arch = "x86_64"),
+    any(target_arch = "x86", target_arch = "x86_64"), 
     any(target_arch = "aarch64", target_arch = "arm64ec"),
 )))]
 compile_error!("The current arch is not supported. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
 #[cfg(not(any(
-    // x86 | x86_64
+    // x86
     all(
         any(target_arch = "x86", target_arch = "x86_64"), 
         any(target_feature = "avx2", target_feature = "sse2"),
     ), 
-    // aarch64 | arm64ec
+    // arm
     all(
         any(target_arch = "aarch64", target_arch = "arm64ec"), 
         target_feature = "neon",
@@ -25,94 +25,131 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
 )))]
 compile_error!("The required features for SIMD are not available. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
-pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
-    // The needle indicates what we are looking for.
-    // We are looking for a byte where the first bit is set.
-    // (ASCII has a value of 0-127, which means that the first bit is never set)
-    const NEEDLE: u8 = 0b10000000;
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"), 
+    target_feature = "avx2"
+))]
+unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    // We use this macro to check at runtime whether the CPU feature "avx2" is available.
+    if is_x86_feature_detected!("avx2") {
+        let block_count = haystack.len() / 32;
+        *remainder = block_count * 32;
 
-    // Depending on the feature used, the remainder indicates how many bytes
-    // have already been checked and can be skipped if we reach the end of this function.
-    let mut remainder = 0;
+        for i in (0..*remainder).step_by(32) {
+            let chunk_ptr = haystack.as_ptr().add(i);
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        #[cfg(target_feature = "avx2")]
-        // The following code will only be added if the feature is supported at compile time, otherwise this code will be executed slowly.
-        if haystack.len() >= 32 {
-            // Here we check during runtime whether this feature is supported by the currently used processor.
-            if is_x86_feature_detected!("avx2") {
-                let block_count = haystack.len() / 32;
-                remainder = 32 * block_count;
+            // Load the current chunk into a SIMD vector.
+            let simd_vec = x86::_mm256_loadu_si256(chunk_ptr as *const x86::__m256i);
 
-                for i in (0..remainder).step_by(32) {
-                    let chunk_ptr = haystack.as_ptr().add(i);
-
-                    // Load the current chunk into a SIMD vector.
-                    let simd_vec = x86::_mm256_loadu_si256(chunk_ptr as *const x86::__m256i);
-
-                    // Check if any byte matches.
-                    let mask = x86::_mm256_movemask_epi8(simd_vec);
-                    if mask != 0 {
-                        // We have found a non-ASCII character.
-                        let pos = i + (mask.trailing_zeros() as usize);
-                        return Some(pos);
-                    }
-                }
-            }
-        }
-        
-        #[cfg(target_feature = "sse2")]
-        // The following code will only be added if the feature is supported at compile time, otherwise this code will be executed slowly.
-        if remainder == 0 && haystack.len() >= 16 {
-            // Here we check during runtime whether this feature is supported by the currently used processor.
-            if is_x86_feature_detected!("sse2") {
-                let block_count = haystack.len() / 16;
-                remainder = 16 * block_count;
-
-                for i in (0..remainder).step_by(16) {
-                    let chunk_ptr = haystack.as_ptr().add(i);
-
-                    // Load the current chunk into a SIMD vector.
-                    let simd_vec = x86::_mm_loadu_si128(chunk_ptr as *const x86::__m128i);
-
-                    // Check if any byte matches.
-                    let mask = x86::_mm_movemask_epi8(simd_vec);
-                    if mask != 0 {
-                        // We have found a non-ASCII character.
-                        let pos = i + (mask.trailing_zeros() as usize);
-                        return Some(pos);
-                    }
-                }
+            // Check if any byte matches.
+            let mask = x86::_mm256_movemask_epi8(simd_vec);
+            if mask != 0 {
+                // We have found a non-ASCII character.
+                let pos = i + (mask.trailing_zeros() as usize);
+                return Some(pos);
             }
         }
     }
+    None
+}
 
-    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-    {
-        #[cfg(target_feature = "neon")]
-        // The following code will only be added if the feature is supported at compile time, otherwise this code will be executed slowly.
-        if haystack.len() >= 16 {
-            // Here we check during runtime whether this feature is supported by the currently used processor.
-            if std::arch::is_aarch64_feature_detected!("neon") {
-                let block_count = haystack.len() / 16;
-                remainder = 16 * block_count;
-    
-                for i in (0..remainder).step_by(16) {
-                    let chunk_ptr = haystack.as_ptr().add(i);
-    
-                    // Load the current chunk into a SIMD vector.
-                    let simd_vec = arm::vld1q_u8(chunk_ptr);
-    
-                    // Check if any byte matches.
-                    let mask = neon_movemask_epu8(simd_vec);
-                    if mask != 0 {
-                        // We have found a non-ASCII character.
-                        let pos = i + (mask.trailing_zeros() as usize);
-                        return Some(pos);
-                    }
-                }
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"), 
+    target_feature = "sse2"
+))]
+unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    // We use this macro to check at runtime whether the CPU feature "sse2" is available.
+    if is_x86_feature_detected!("sse2") {
+        let block_count = haystack.len() / 16;
+        let tmp_remainder = block_count * 16;
+
+        for i in (*remainder..tmp_remainder).step_by(16) {
+            let chunk_ptr = haystack.as_ptr().add(i);
+
+            // Load the current chunk into a SIMD vector.
+            let simd_vec = x86::_mm_loadu_si128(chunk_ptr as *const x86::__m128i);
+
+            // Check if any byte matches.
+            let mask = x86::_mm_movemask_epi8(simd_vec);
+            if mask != 0 {
+                // We have found a non-ASCII character.
+                let pos = i + (mask.trailing_zeros() as usize);
+                return Some(pos);
             }
+        }
+
+        *remainder = tmp_remainder;
+    }
+    None
+}
+
+#[cfg(all(
+    any(target_arch = "aarch64", target_arch = "arm64ec"), 
+    target_feature = "neon"
+))]
+unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    // We use this macro to check at runtime whether the CPU feature "neon" is available.
+    if std::arch::is_aarch64_feature_detected!("neon") {
+        let block_count = haystack.len() / 16;
+        *remainder = block_count * 16;
+
+        for i in (0..*remainder).step_by(16) {
+            let chunk_ptr = haystack.as_ptr().add(i);
+
+            // Load the current chunk into a SIMD vector.
+            let simd_vec = arm::vld1q_u8(chunk_ptr);
+
+            // Check if any byte matches.
+            let mask = neon_movemask_epu8(simd_vec);
+            if mask != 0 {
+                // We have found a non-ASCII character.
+                let pos = i + (mask.trailing_zeros() as usize);
+                return Some(pos);
+            }
+        }
+    }
+    None
+}
+
+pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
+    // The needle we are looking for.
+    // We are looking for a byte where the sign bit is set.
+    // (ASCII has a value of 0-127, which means that the sign bit is never set)
+    const NEEDLE: u8 = 0b10000000;
+
+    // At the end of this function, the number (remainder) of bytes are skipped.
+    let mut remainder = 0;
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"), 
+        target_feature = "avx2"
+    ))]
+    if haystack.len() >= 32 {
+        let result = nnap_avx2(haystack, &mut remainder);
+        if result.is_some() {
+            return result;
+        }
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"), 
+        target_feature = "sse2"
+    ))]
+    if (haystack.len() - remainder) >= 16 {
+        let result = nnap_sse2(haystack, &mut remainder);
+        if result.is_some() {
+            return result;
+        }
+    }
+
+    #[cfg(all(
+        any(target_arch = "aarch64", target_arch = "arm64ec"), 
+        target_feature = "neon"
+    ))]
+    if haystack.len() >= 16 {
+        let result = nnap_neon(haystack, &mut remainder);
+        if result.is_some() {
+            return result;
         }
     }
     
@@ -123,8 +160,10 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         .map(|result| remainder + result)
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-#[cfg(target_feature = "neon")]
+#[cfg(all(
+    any(target_arch = "aarch64", target_arch = "arm64ec"), 
+    target_feature = "neon"
+))]
 /// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
 /// 
 /// Note: "big endian" support is based on a theory.
@@ -210,4 +249,61 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
     
     // Our final result:
     ((high as u16) << 8) | (low as u16)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"), 
+        target_feature = "avx2"
+    ))]
+    #[test]
+    fn nnap_avx2() {
+        const RESULTS: [(&[u8], usize); 2] = [
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
+        ];
+        
+        for (idx, result) in RESULTS.into_iter().enumerate() {
+            let mut tmp = 0;
+            let value = unsafe { super::nnap_avx2(result.0, &mut tmp) };
+            assert_eq!(value, Some(result.1), "failed at index {}", idx);
+        }
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"), 
+        target_feature = "sse2"
+    ))]
+    #[test]
+    fn nnap_sse2() {
+        const RESULTS: [(&[u8], usize); 2] = [
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 15),
+        ];
+        
+        for (idx, result) in RESULTS.into_iter().enumerate() {
+            let mut tmp = 0;
+            let value = unsafe { super::nnap_sse2(result.0, &mut tmp) };
+            assert_eq!(value, Some(result.1), "failed at index {}", idx);
+        }
+    }
+
+    #[cfg(all(
+        any(target_arch = "aarch64", target_arch = "arm64ec"), 
+        target_feature = "neon"
+    ))]
+    #[test]
+    fn nnap_neon() {
+        const RESULTS: [(&[u8], usize); 2] = [
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
+        ];
+        
+        for (idx, result) in RESULTS.into_iter().enumerate() {
+            let mut tmp = 0;
+            let value = unsafe { super::nnap_neon(result.0, &mut tmp) };
+            assert_eq!(value, Some(result.1), "failed at index {}", idx);
+        }
+    }
 }
