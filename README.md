@@ -2,7 +2,7 @@
 [![Crates.io Version](https://img.shields.io/crates/v/utf-c?style=flat-square)](https://crates.io/crates/utf-c)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/utf-c/rust/blob/main/LICENSE)
 
-UTF-C is a compression for short UTF-8 messages with non-ASCII characters (See the [comparisons](https://github.com/utf-c/rust/edit/main/README.md#comparisons) below).
+UTF-C is a compression for short UTF-8 messages with non-ASCII characters (See the [comparisons](https://github.com/utf-c/rust?tab=readme-ov-file#comparisons) below).
 
 > [!NOTE]
 > Here you can find texts translated with [Google Translate](https://translate.google.com/).
