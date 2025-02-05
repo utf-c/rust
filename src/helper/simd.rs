@@ -30,25 +30,28 @@ compile_error!("The required features for SIMD are not available. Please disable
     target_feature = "avx2"
 ))]
 unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    const BYTES_LEN: usize = 32;
+    
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
     if is_x86_feature_detected!("avx2") {
-        let block_count = haystack.len() / 32;
-        *remainder = block_count * 32;
+        let block_count = haystack.len() / BYTES_LEN;
 
-        for i in (0..*remainder).step_by(32) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
+        let chunk_ptr = haystack.as_ptr();
+        for block in 0..block_count {
             // Load the current chunk into a SIMD vector.
-            let simd_vec = x86::_mm256_loadu_si256(chunk_ptr as *const x86::__m256i);
+            let chunk_pos = BYTES_LEN * block;
+            let simd_vec = x86::_mm256_loadu_si256(chunk_ptr.add(chunk_pos) as *const x86::__m256i);
 
-            // Check if any byte matches.
+            // Check if a byte with a sign bit was found.
             let mask = x86::_mm256_movemask_epi8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                // We found a non-ASCII character at the following index:
+                let idx = chunk_pos + (mask.trailing_zeros() as usize);
+                return Some(idx);
             }
         }
+
+        *remainder = block_count % BYTES_LEN;
     }
     None
 }
@@ -58,27 +61,29 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     target_feature = "sse2"
 ))]
 unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    const BYTES_LEN: usize = 16;
+
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
-        let block_count = haystack.len() / 16;
-        let tmp_remainder = block_count * 16;
+        let old_block_count = *remainder / BYTES_LEN;
+        let block_count = haystack.len() / BYTES_LEN;
 
-        for i in (*remainder..tmp_remainder).step_by(16) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
+        let chunk_ptr = haystack.as_ptr();
+        for block in old_block_count..block_count {
             // Load the current chunk into a SIMD vector.
-            let simd_vec = x86::_mm_loadu_si128(chunk_ptr as *const x86::__m128i);
+            let chunk_pos = BYTES_LEN * block;
+            let simd_vec = x86::_mm_loadu_si128(chunk_ptr.add(chunk_pos) as *const x86::__m128i);
 
-            // Check if any byte matches.
+            // Check if a byte with a sign bit was found.
             let mask = x86::_mm_movemask_epi8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                // We found a non-ASCII character at the following index:
+                let idx = chunk_pos + (mask.trailing_zeros() as usize);
+                return Some(idx);
             }
         }
 
-        *remainder = tmp_remainder;
+        *remainder = block_count % BYTES_LEN;
     }
     None
 }
@@ -88,25 +93,28 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     target_feature = "neon"
 ))]
 unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+    const BYTES_LEN: usize = 16;
+
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let block_count = haystack.len() / 16;
-        *remainder = block_count * 16;
+        let block_count = haystack.len() / BYTES_LEN;
 
-        for i in (0..*remainder).step_by(16) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
+        let chunk_ptr = haystack.as_ptr();
+        for block in 0..block_count {
             // Load the current chunk into a SIMD vector.
-            let simd_vec = arm::vld1q_u8(chunk_ptr);
+            let chunk_pos = BYTES_LEN * block;
+            let simd_vec = arm::vld1q_u8(chunk_ptr.add(chunk_pos));
 
-            // Check if any byte matches.
+            // Check if a byte with a sign bit was found.
             let mask = neon_movemask_epu8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                // We found a non-ASCII character at the following index:
+                let idx = chunk_pos + (mask.trailing_zeros() as usize);
+                return Some(idx);
             }
         }
+
+        *remainder = block_count % BYTES_LEN;
     }
     None
 }
@@ -260,7 +268,7 @@ mod tests {
     #[test]
     fn nnap_avx2() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
@@ -278,8 +286,8 @@ mod tests {
     #[test]
     fn nnap_sse2() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
-            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 15),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
         for (idx, result) in RESULTS.into_iter().enumerate() {
@@ -296,7 +304,7 @@ mod tests {
     #[test]
     fn nnap_neon() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
