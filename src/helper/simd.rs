@@ -30,16 +30,16 @@ compile_error!("The required features for SIMD are not available. Please disable
     target_feature = "avx2"
 ))]
 unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
-    const BYTES_LEN: usize = 32;
+    const BLOCK_LEN: usize = 32;
     
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
     if is_x86_feature_detected!("avx2") {
-        let block_count = haystack.len() / BYTES_LEN;
+        let block_count = haystack.len() / BLOCK_LEN;
 
         let chunk_ptr = haystack.as_ptr();
         for block in 0..block_count {
             // Load the current chunk into a SIMD vector.
-            let chunk_pos = BYTES_LEN * block;
+            let chunk_pos = BLOCK_LEN * block;
             let simd_vec = x86::_mm256_loadu_si256(chunk_ptr.add(chunk_pos) as *const x86::__m256i);
 
             // Check if a byte with a sign bit was found.
@@ -51,7 +51,7 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BYTES_LEN;
+        *remainder = block_count % BLOCK_LEN;
     }
     None
 }
@@ -61,17 +61,17 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     target_feature = "sse2"
 ))]
 unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
-    const BYTES_LEN: usize = 16;
+    const BLOCK_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
-        let old_block_count = *remainder / BYTES_LEN;
-        let block_count = haystack.len() / BYTES_LEN;
+        let old_block_count = *remainder / BLOCK_LEN;
+        let block_count = haystack.len() / BLOCK_LEN;
 
         let chunk_ptr = haystack.as_ptr();
         for block in old_block_count..block_count {
             // Load the current chunk into a SIMD vector.
-            let chunk_pos = BYTES_LEN * block;
+            let chunk_pos = BLOCK_LEN * block;
             let simd_vec = x86::_mm_loadu_si128(chunk_ptr.add(chunk_pos) as *const x86::__m128i);
 
             // Check if a byte with a sign bit was found.
@@ -83,7 +83,7 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BYTES_LEN;
+        *remainder = block_count % BLOCK_LEN;
     }
     None
 }
@@ -93,16 +93,16 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     target_feature = "neon"
 ))]
 unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
-    const BYTES_LEN: usize = 16;
+    const BLOCK_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let block_count = haystack.len() / BYTES_LEN;
+        let block_count = haystack.len() / BLOCK_LEN;
 
         let chunk_ptr = haystack.as_ptr();
         for block in 0..block_count {
             // Load the current chunk into a SIMD vector.
-            let chunk_pos = BYTES_LEN * block;
+            let chunk_pos = BLOCK_LEN * block;
             let simd_vec = arm::vld1q_u8(chunk_ptr.add(chunk_pos));
 
             // Check if a byte with a sign bit was found.
@@ -114,7 +114,7 @@ unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BYTES_LEN;
+        *remainder = block_count % BLOCK_LEN;
     }
     None
 }
