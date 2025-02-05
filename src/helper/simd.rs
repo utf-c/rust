@@ -29,7 +29,7 @@ compile_error!("The required features for SIMD are not available. Please disable
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "avx2"
 ))]
-unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+unsafe fn nnap_avx2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     const BLOCK_LEN: usize = 32;
     
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
@@ -51,7 +51,7 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BLOCK_LEN;
+        *skip = block_count * BLOCK_LEN;
     }
     None
 }
@@ -60,12 +60,12 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "sse2"
 ))]
-unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+unsafe fn nnap_sse2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     const BLOCK_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
-        let old_block_count = *remainder / BLOCK_LEN;
+        let old_block_count = *skip / BLOCK_LEN;
         let block_count = haystack.len() / BLOCK_LEN;
 
         let chunk_ptr = haystack.as_ptr();
@@ -83,7 +83,7 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BLOCK_LEN;
+        *skip = block_count * BLOCK_LEN;
     }
     None
 }
@@ -92,7 +92,7 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     any(target_arch = "aarch64", target_arch = "arm64ec"), 
     target_feature = "neon"
 ))]
-unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+unsafe fn nnap_neon(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     const BLOCK_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
@@ -114,7 +114,7 @@ unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
             }
         }
 
-        *remainder = block_count % BLOCK_LEN;
+        *skip = block_count * BLOCK_LEN;
     }
     None
 }
@@ -125,15 +125,16 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
     // (ASCII has a value of 0-127, which means that the sign bit is never set)
     const NEEDLE: u8 = 0b10000000;
 
-    // At the end of this function, the number (remainder) of bytes are skipped.
-    let mut remainder = 0;
+    // The number of bytes to skip.
+    // As an example: If AVX2 has already checked 32 bytes, SSE2 should skip these 32.
+    let mut skip = 0;
 
     #[cfg(all(
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "avx2"
     ))]
     if haystack.len() >= 32 {
-        let result = nnap_avx2(haystack, &mut remainder);
+        let result = nnap_avx2(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -143,8 +144,8 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "sse2"
     ))]
-    if (haystack.len() - remainder) >= 16 {
-        let result = nnap_sse2(haystack, &mut remainder);
+    if (haystack.len() - skip) >= 16 {
+        let result = nnap_sse2(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -155,7 +156,7 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         target_feature = "neon"
     ))]
     if haystack.len() >= 16 {
-        let result = nnap_neon(haystack, &mut remainder);
+        let result = nnap_neon(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -163,9 +164,9 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
     
     // Search the remaining bytes for the needle.
     haystack.iter()
-        .skip(remainder)
+        .skip(skip)
         .position(|b| *b & NEEDLE != 0)
-        .map(|result| remainder + result)
+        .map(|result| skip + result)
 }
 
 #[cfg(all(
