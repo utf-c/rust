@@ -175,70 +175,41 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
 ))]
 /// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
 /// 
-/// Note: "big endian" support is based on a theory.
-/// https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
+/// [Click here for more details about `_mm_movemask_epi8`](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movemask_epi8&ig_expand=4602)
 unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
-    // For the description below we have as an example a 16x-u8 vector where each element has the sign bit set:
-    // [
-    //   0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
-    //   0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
-    // ]
+    /*
+     * For more details and the "big endian" theory:
+     * https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
+     */
     
-    // We shift the sign bit of all bytes to the right by (N=7).
-    // 11111111
-    // |______
-    //        |
-    // 00000001
+    // We shift the bits of all elements (N=7) to the right.
     let shift_u8 = arm::vshrq_n_u8(value, 7);
-    // We now turn the vector 16x-u8 into 8x-u16.
-    // Here is an example of what happens to the elements:
-    // 00000001(u8) + 
-    // 00000001(u8) = 
-    // 00000001 00000001(u16)
+    // We now turn the vector 16x-u8 into a 8x-u16.
     let vec_8x16 = arm::vreinterpretq_u16_u8(shift_u8);
 
-    // An element now looks like this:
-    // 00000001 00000001(u16)
-    // Now all bits are shifted to the right by (N=7), which gives us the following result:
-    // 00000000 00000010(2)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011(259)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=7) to the right and accumulate them with the other.
     let shift_u16 = arm::vsraq_n_u16(vec_8x16, vec_8x16, 7);
-    // We now turn the vector 8x-u16 into 4x-u32.
-    // Here is an example of what happens to the elements:
-    // 00000001 00000011(u16) + 
-    // 00000001 00000011(u16) = 
-    // 00000001 00000011 00000001 00000011(u32)
+    // We now turn the vector 8x-u16 into a 4x-u32.
     let vec_4x32 = arm::vreinterpretq_u32_u16(shift_u16);
 
-    // An element now looks like this:
-    // 00000001 00000011 00000001 00000011(u32)
-    // Now all bits are shifted to the right by (N=14), which gives us the following result:
-    // 00000000 00000000 00000100 00001100(1036)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011 00000101 00001111(16975119)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=14) to the right and accumulate them with the other.
     let shift_u32 = arm::vsraq_n_u32(vec_4x32, vec_4x32, 14);
-    // We now turn the vector 4x-u32 into 2x-u64.
-    // Here is an example of what happens to the elements:
-    // 00000001 00000011 00000101 00001111(u32) + 
-    // 00000001 00000011 00000101 00001111(u32) = 
-    // 00000001 00000011 00000101 00001111 00000001 00000011 00000101 00001111(u64)
+    // We now turn the vector 4x-u32 into a 2x-u64.
     let vec_2x64 = arm::vreinterpretq_u64_u32(shift_u32);
 
-    // An element now looks like this:
-    // 00000001 00000011 00000101 00001111 00000001 00000011 00000101 00001111(u64)
-    // Now all bits are shifted to the right by (N=28), which gives us the following result:
-    // 00000000 00000000 00000000 00000000 00010000 00110000 01010000 11110000(271601904)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011 00000101 00001111 00010001 00110011 01010101 11111111(72907581239285247)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=28) to the right and accumulate them with the other.
     let shift_u64 = arm::vsraq_n_u64(vec_2x64, vec_2x64, 28);
     // Finally, we turn the vector 2x-u64 back into a 16x-u8.
     let vec_16x8 = arm::vreinterpretq_u8_u64(shift_u64);
 
+    // Now we extract two elements (our "low" and "high") to get our result.
+    // NOTE: To understand why there are differences here, look at the theory.
     let (low, high): (u8, u8);
     #[cfg(target_endian = "little")]
     {
-        // Our results ("low" and "high") are now in the first and ninth elements.
         (low, high) = (
             arm::vgetq_lane_u8(vec_16x8, 0),
             arm::vgetq_lane_u8(vec_16x8, 8),
@@ -246,10 +217,8 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
     }
     #[cfg(target_endian = "big")]
     {
-        // To get the correct result with "big endian", we have to reverse the bits of all bytes.
+        // To get the correct result with "big endian", we have to reverse the bits of all elements.
         let reversed = arm::vrbitq_u8(vec_16x8);
-
-        // Our results ("low" and "high") are now in the eighth and sixteenth elements.
         (low, high) = (
             arm::vgetq_lane_u8(reversed, 7),
             arm::vgetq_lane_u8(reversed, 15),
