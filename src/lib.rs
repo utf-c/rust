@@ -7,7 +7,7 @@ use char_set::CharSetType;
 #[inline]
 fn _is_ascii_then(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
     // Now check up to which position it is no longer an ASCII character.
-    if let Some(next_pos) = helper::next_non_ascii_pos(value) {
+    if let Some(next_pos) = helper::next_non_ascii_pos(*value) {
         // Position found, now add all bytes up to this position and continue the loop.
         result.extend_from_slice(&value[..next_pos]);
         *value = &value[next_pos..];
