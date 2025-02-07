@@ -4,11 +4,18 @@ mod char_set;
 use char_set::CharSetType;
 
 /// Returns `false` if all characters are ASCII, otherwise `true`.
-#[inline]
+#[inline(always)]
 fn _is_ascii_then(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
-    // Now check up to which position it is no longer an ASCII character.
-    if let Some(next_pos) = helper::next_non_ascii_pos(value) {
-        // Position found, now add all bytes up to this position and continue the loop.
+    // Check if only one character is left or if the second is a non-ASCII character.
+    if value.len() == 1 || (value[1] >> 7) != 0 {
+        result.push(value[0]);
+        *value = &value[1..];
+        return true;
+    }
+
+    // Now check up to which index it is no longer an ASCII character.
+    if let Some(next_pos) = helper::next_non_ascii_idx(*value) {
+        // Index found, now add all bytes up to this index and continue the loop.
         result.extend_from_slice(&value[..next_pos]);
         *value = &value[next_pos..];
         return true;

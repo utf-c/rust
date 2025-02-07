@@ -29,26 +29,29 @@ compile_error!("The required features for SIMD are not available. Please disable
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "avx2"
 ))]
-unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+unsafe fn nnap_avx2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
+    const VEC_LEN: usize = 32;
+    
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
     if is_x86_feature_detected!("avx2") {
-        let block_count = haystack.len() / 32;
-        *remainder = block_count * 32;
+        let (len, ptr) = (
+            haystack.len(),
+            haystack.as_ptr()
+        );
+        let mut idx = 0;
 
-        for i in (0..*remainder).step_by(32) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
-            // Load the current chunk into a SIMD vector.
-            let simd_vec = x86::_mm256_loadu_si256(chunk_ptr as *const x86::__m256i);
-
-            // Check if any byte matches.
+        while idx + VEC_LEN <= len {
+            let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
             let mask = x86::_mm256_movemask_epi8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                let result = idx + (mask.trailing_zeros() as usize);
+                return Some(result);
             }
+
+            idx += VEC_LEN;
         }
+
+        *skip = idx;
     }
     None
 }
@@ -57,28 +60,29 @@ unsafe fn nnap_avx2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "sse2"
 ))]
-unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+unsafe fn nnap_sse2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
+    const VEC_LEN: usize = 16;
+
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
-        let block_count = haystack.len() / 16;
-        let tmp_remainder = block_count * 16;
+        let (len, ptr) = (
+            haystack.len(),
+            haystack.as_ptr()
+        );
+        let mut idx = *skip;
 
-        for i in (*remainder..tmp_remainder).step_by(16) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
-            // Load the current chunk into a SIMD vector.
-            let simd_vec = x86::_mm_loadu_si128(chunk_ptr as *const x86::__m128i);
-
-            // Check if any byte matches.
+        while idx + VEC_LEN <= len {
+            let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
             let mask = x86::_mm_movemask_epi8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                let result = idx + (mask.trailing_zeros() as usize);
+                return Some(result);
             }
+            
+            idx += VEC_LEN;
         }
 
-        *remainder = tmp_remainder;
+        *skip = idx;
     }
     None
 }
@@ -87,26 +91,30 @@ unsafe fn nnap_sse2(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
     any(target_arch = "aarch64", target_arch = "arm64ec"), 
     target_feature = "neon"
 ))]
-unsafe fn nnap_neon(haystack: &[u8], remainder: &mut usize) -> Option<usize> {
+#[inline(always)]
+unsafe fn nnap_neon(haystack: &[u8], skip: &mut usize) -> Option<usize> {
+    const VEC_LEN: usize = 16;
+
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let block_count = haystack.len() / 16;
-        *remainder = block_count * 16;
+        let (len, ptr) = (
+            haystack.len(),
+            haystack.as_ptr()
+        );
+        let mut idx = 0;
 
-        for i in (0..*remainder).step_by(16) {
-            let chunk_ptr = haystack.as_ptr().add(i);
-
-            // Load the current chunk into a SIMD vector.
-            let simd_vec = arm::vld1q_u8(chunk_ptr);
-
-            // Check if any byte matches.
+        while idx + VEC_LEN <= len {
+            let simd_vec = arm::vld1q_u8(ptr.add(idx));
             let mask = neon_movemask_epu8(simd_vec);
             if mask != 0 {
-                // We have found a non-ASCII character.
-                let pos = i + (mask.trailing_zeros() as usize);
-                return Some(pos);
+                let result = idx + (mask.trailing_zeros() as usize);
+                return Some(result);
             }
+            
+            idx += VEC_LEN;
         }
+
+        *skip = idx;
     }
     None
 }
@@ -117,15 +125,16 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
     // (ASCII has a value of 0-127, which means that the sign bit is never set)
     const NEEDLE: u8 = 0b10000000;
 
-    // At the end of this function, the number (remainder) of bytes are skipped.
-    let mut remainder = 0;
+    // The number of bytes to skip.
+    // As an example: If AVX2 has already checked 32 bytes, SSE2 should skip these 32.
+    let mut skip = 0;
 
     #[cfg(all(
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "avx2"
     ))]
     if haystack.len() >= 32 {
-        let result = nnap_avx2(haystack, &mut remainder);
+        let result = nnap_avx2(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -135,8 +144,8 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "sse2"
     ))]
-    if (haystack.len() - remainder) >= 16 {
-        let result = nnap_sse2(haystack, &mut remainder);
+    if (haystack.len() - skip) >= 16 {
+        let result = nnap_sse2(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -147,7 +156,7 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         target_feature = "neon"
     ))]
     if haystack.len() >= 16 {
-        let result = nnap_neon(haystack, &mut remainder);
+        let result = nnap_neon(haystack, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -155,9 +164,9 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
     
     // Search the remaining bytes for the needle.
     haystack.iter()
-        .skip(remainder)
+        .skip(skip)
         .position(|b| *b & NEEDLE != 0)
-        .map(|result| remainder + result)
+        .map(|result| skip + result)
 }
 
 #[cfg(all(
@@ -166,70 +175,41 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
 ))]
 /// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
 /// 
-/// Note: "big endian" support is based on a theory.
-/// https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
+/// [Click here for more details about `_mm_movemask_epi8`](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movemask_epi8&ig_expand=4602)
 unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
-    // For the description below we have as an example a 16x-u8 vector where each element has the sign bit set:
-    // [
-    //   0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
-    //   0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
-    // ]
+    /*
+     * For more details and the "big endian" theory:
+     * https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
+     */
     
-    // We shift the sign bit of all bytes to the right by (N=7).
-    // 11111111
-    // |______
-    //        |
-    // 00000001
+    // We shift the bits of all elements (N=7) to the right.
     let shift_u8 = arm::vshrq_n_u8(value, 7);
-    // We now turn the vector 16x-u8 into 8x-u16.
-    // Here is an example of what happens to the elements:
-    // 00000001(u8) + 
-    // 00000001(u8) = 
-    // 00000001 00000001(u16)
+    // We now turn the vector 16x-u8 into a 8x-u16.
     let vec_8x16 = arm::vreinterpretq_u16_u8(shift_u8);
 
-    // An element now looks like this:
-    // 00000001 00000001(u16)
-    // Now all bits are shifted to the right by (N=7), which gives us the following result:
-    // 00000000 00000010(2)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011(259)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=7) to the right and accumulate them with the other.
     let shift_u16 = arm::vsraq_n_u16(vec_8x16, vec_8x16, 7);
-    // We now turn the vector 8x-u16 into 4x-u32.
-    // Here is an example of what happens to the elements:
-    // 00000001 00000011(u16) + 
-    // 00000001 00000011(u16) = 
-    // 00000001 00000011 00000001 00000011(u32)
+    // We now turn the vector 8x-u16 into a 4x-u32.
     let vec_4x32 = arm::vreinterpretq_u32_u16(shift_u16);
 
-    // An element now looks like this:
-    // 00000001 00000011 00000001 00000011(u32)
-    // Now all bits are shifted to the right by (N=14), which gives us the following result:
-    // 00000000 00000000 00000100 00001100(1036)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011 00000101 00001111(16975119)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=14) to the right and accumulate them with the other.
     let shift_u32 = arm::vsraq_n_u32(vec_4x32, vec_4x32, 14);
-    // We now turn the vector 4x-u32 into 2x-u64.
-    // Here is an example of what happens to the elements:
-    // 00000001 00000011 00000101 00001111(u32) + 
-    // 00000001 00000011 00000101 00001111(u32) = 
-    // 00000001 00000011 00000101 00001111 00000001 00000011 00000101 00001111(u64)
+    // We now turn the vector 4x-u32 into a 2x-u64.
     let vec_2x64 = arm::vreinterpretq_u64_u32(shift_u32);
 
-    // An element now looks like this:
-    // 00000001 00000011 00000101 00001111 00000001 00000011 00000101 00001111(u64)
-    // Now all bits are shifted to the right by (N=28), which gives us the following result:
-    // 00000000 00000000 00000000 00000000 00010000 00110000 01010000 11110000(271601904)
-    // Finally, the new result is accumulated to the value on the second vector and we get the following result:
-    // 00000001 00000011 00000101 00001111 00010001 00110011 01010101 11111111(72907581239285247)
+    // We now pass the same vector twice to shift the bits of all elements
+    // in one of these vectors (N=28) to the right and accumulate them with the other.
     let shift_u64 = arm::vsraq_n_u64(vec_2x64, vec_2x64, 28);
     // Finally, we turn the vector 2x-u64 back into a 16x-u8.
     let vec_16x8 = arm::vreinterpretq_u8_u64(shift_u64);
 
+    // Now we extract two elements (our "low" and "high") to get our result.
+    // NOTE: To understand why there are differences here, look at the theory.
     let (low, high): (u8, u8);
     #[cfg(target_endian = "little")]
     {
-        // Our results ("low" and "high") are now in the first and ninth elements.
         (low, high) = (
             arm::vgetq_lane_u8(vec_16x8, 0),
             arm::vgetq_lane_u8(vec_16x8, 8),
@@ -237,10 +217,8 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
     }
     #[cfg(target_endian = "big")]
     {
-        // To get the correct result with "big endian", we have to reverse the bits of all bytes.
+        // To get the correct result with "big endian", we have to reverse the bits of all elements.
         let reversed = arm::vrbitq_u8(vec_16x8);
-
-        // Our results ("low" and "high") are now in the eighth and sixteenth elements.
         (low, high) = (
             arm::vgetq_lane_u8(reversed, 7),
             arm::vgetq_lane_u8(reversed, 15),
@@ -260,7 +238,7 @@ mod tests {
     #[test]
     fn nnap_avx2() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
@@ -278,8 +256,8 @@ mod tests {
     #[test]
     fn nnap_sse2() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
-            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 15),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
         for (idx, result) in RESULTS.into_iter().enumerate() {
@@ -296,7 +274,7 @@ mod tests {
     #[test]
     fn nnap_neon() {
         const RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         

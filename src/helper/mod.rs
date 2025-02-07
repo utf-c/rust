@@ -2,20 +2,27 @@
 mod simd;
 
 /// This function checks whether the haystack consists only of ASCII characters.
-pub fn only_ascii(haystack: &[u8]) -> bool {
+pub fn only_ascii<T>(haystack: T) -> bool
+where 
+    T: AsRef<[u8]>,
+{
     #[cfg(feature = "simd")]
-    return unsafe { simd::next_non_ascii_pos(haystack) }.is_none();
+    return unsafe { simd::next_non_ascii_pos(haystack.as_ref()) }.is_none();
 
     #[cfg(not(feature = "simd"))]
-    return haystack.iter().all(|b| *b & 0b10000000 == 0);
+    return haystack.as_ref().iter().all(|b| *b & 0b10000000 == 0);
 }
 
-pub(crate) fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
+/// This function returns the index of the next non-ASCII character.
+pub fn next_non_ascii_idx<T>(haystack: T) -> Option<usize>
+where 
+    T: AsRef<[u8]>,
+{
     #[cfg(feature = "simd")]
-    return unsafe { simd::next_non_ascii_pos(haystack) };
+    return unsafe { simd::next_non_ascii_pos(haystack.as_ref()) };
 
     #[cfg(not(feature = "simd"))]
-    return haystack.iter().position(|b| *b & 0b10000000 != 0);
+    return haystack.as_ref().iter().position(|b| *b & 0b10000000 != 0);
 }
 
 #[cfg(test)]
@@ -50,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn next_non_ascii_pos() {
+    fn next_non_ascii_idx() {
         const RESULTS: [(&[u8], usize); 11] = [
             (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 14),
@@ -69,7 +76,7 @@ mod tests {
         ];
         
         for (idx, result) in RESULTS.into_iter().enumerate() {
-            let value = super::next_non_ascii_pos(result.0);
+            let value = super::next_non_ascii_idx(result.0);
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
         }
     }
