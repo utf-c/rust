@@ -56,17 +56,17 @@ codegen-units = 1   # Maximize size reduction optimizations
 
 ```
 "👁👄👁" compression and decompression 50000x (12 bytes)
-[flate2 | compression  ] finished after 927140 µs (31 bytes)
-[flate2 | decompression] finished after 392669 µs
-[utf-c  | compression  ] finished after 3484 µs (7 bytes)
-[utf-c  | decompression] finished after 3541 µs
+[flate2 | compression  ] finished after 926231 µs (31 bytes)
+[flate2 | decompression] finished after 335222 µs
+[utf-c  | compression  ] finished after 3325 µs (7 bytes)
+[utf-c  | decompression] finished after 3546 µs
 ```
 ```
 "טקסט זה נדחס עם UTF-C ו-GZIP ולאחר מכן הושווה. טקסט זה תורגם עם Google Translate ואנו מקווים שהוא תורגם כהלכה, אך אין ערובה לכך" compression and decompression 50000x (204 bytes)
-[flate2 | compression  ] finished after 1471568 µs (160 bytes)
-[flate2 | decompression] finished after 475056 µs
-[utf-c  | compression  ] finished after 55013 µs (129 bytes)
-[utf-c  | decompression] finished after 53072 µs
+[flate2 | compression  ] finished after 1507926 µs (160 bytes)
+[flate2 | decompression] finished after 466058 µs
+[utf-c  | compression  ] finished after 51067 µs (129 bytes)
+[utf-c  | decompression] finished after 53226 µs
 ```
 
 #### 🪟 Windows 11 Pro (24H2)
@@ -78,15 +78,15 @@ codegen-units = 1   # Maximize size reduction optimizations
 
 ```
 "👁👄👁" compression and decompression 50000x (12 bytes)
-[flate2 | compression  ] finished after 352210 µs (31 bytes)
-[flate2 | decompression] finished after 182026 µs
-[utf-c  | compression  ] finished after 1843 µs (7 bytes)
-[utf-c  | decompression] finished after 1895 µs
+[flate2 | compression  ] finished after 363896 µs (31 bytes)
+[flate2 | decompression] finished after 179868 µs
+[utf-c  | compression  ] finished after 1755 µs (7 bytes)
+[utf-c  | decompression] finished after 1887 µs
 ```
 ```
 "טקסט זה נדחס עם UTF-C ו-GZIP ולאחר מכן הושווה. טקסט זה תורגם עם Google Translate ואנו מקווים שהוא תורגם כהלכה, אך אין ערובה לכך" compression and decompression 50000x (204 bytes)
-[flate2 | compression  ] finished after 522083 µs (159 bytes)
-[flate2 | decompression] finished after 231344 µs
-[utf-c  | compression  ] finished after 17638 µs (128 bytes)
-[utf-c  | decompression] finished after 20347 µs
+[flate2 | compression  ] finished after 517129 µs (160 bytes)
+[flate2 | decompression] finished after 235639 µs
+[utf-c  | compression  ] finished after 15883 µs (129 bytes)
+[utf-c  | decompression] finished after 18662 µs
 ```

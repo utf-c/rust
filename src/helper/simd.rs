@@ -29,18 +29,18 @@ compile_error!("The required features for SIMD are not available. Please disable
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "avx2"
 ))]
-unsafe fn nnap_avx2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
-    const VEC_LEN: usize = 32;
+unsafe fn fpbi_avx2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
+    const C_VEC_LEN: usize = 32;
     
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
     if is_x86_feature_detected!("avx2") {
         let (len, ptr) = (
-            haystack.len(),
-            haystack.as_ptr()
+            bytes.len(),
+            bytes.as_ptr()
         );
         let mut idx = 0;
 
-        while idx + VEC_LEN <= len {
+        while idx + C_VEC_LEN <= len {
             let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
             let mask = x86::_mm256_movemask_epi8(simd_vec);
             if mask != 0 {
@@ -48,7 +48,7 @@ unsafe fn nnap_avx2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
                 return Some(result);
             }
 
-            idx += VEC_LEN;
+            idx += C_VEC_LEN;
         }
 
         *skip = idx;
@@ -60,18 +60,18 @@ unsafe fn nnap_avx2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     any(target_arch = "x86", target_arch = "x86_64"), 
     target_feature = "sse2"
 ))]
-unsafe fn nnap_sse2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
-    const VEC_LEN: usize = 16;
+unsafe fn fpbi_sse2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
+    const C_VEC_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
         let (len, ptr) = (
-            haystack.len(),
-            haystack.as_ptr()
+            bytes.len(),
+            bytes.as_ptr()
         );
         let mut idx = *skip;
 
-        while idx + VEC_LEN <= len {
+        while idx + C_VEC_LEN <= len {
             let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
             let mask = x86::_mm_movemask_epi8(simd_vec);
             if mask != 0 {
@@ -79,7 +79,7 @@ unsafe fn nnap_sse2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
                 return Some(result);
             }
             
-            idx += VEC_LEN;
+            idx += C_VEC_LEN;
         }
 
         *skip = idx;
@@ -92,18 +92,18 @@ unsafe fn nnap_sse2(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     target_feature = "neon"
 ))]
 #[inline(always)]
-unsafe fn nnap_neon(haystack: &[u8], skip: &mut usize) -> Option<usize> {
-    const VEC_LEN: usize = 16;
+unsafe fn fpbi_neon(bytes: &[u8], skip: &mut usize) -> Option<usize> {
+    const C_VEC_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
     if std::arch::is_aarch64_feature_detected!("neon") {
         let (len, ptr) = (
-            haystack.len(),
-            haystack.as_ptr()
+            bytes.len(),
+            bytes.as_ptr()
         );
         let mut idx = 0;
 
-        while idx + VEC_LEN <= len {
+        while idx + C_VEC_LEN <= len {
             let simd_vec = arm::vld1q_u8(ptr.add(idx));
             let mask = neon_movemask_epu8(simd_vec);
             if mask != 0 {
@@ -111,7 +111,7 @@ unsafe fn nnap_neon(haystack: &[u8], skip: &mut usize) -> Option<usize> {
                 return Some(result);
             }
             
-            idx += VEC_LEN;
+            idx += C_VEC_LEN;
         }
 
         *skip = idx;
@@ -119,12 +119,8 @@ unsafe fn nnap_neon(haystack: &[u8], skip: &mut usize) -> Option<usize> {
     None
 }
 
-pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
-    // The needle we are looking for.
-    // We are looking for a byte where the sign bit is set.
-    // (ASCII has a value of 0-127, which means that the sign bit is never set)
-    const NEEDLE: u8 = 0b10000000;
-
+pub unsafe fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
+    let len = bytes.len();
     // The number of bytes to skip.
     // As an example: If AVX2 has already checked 32 bytes, SSE2 should skip these 32.
     let mut skip = 0;
@@ -133,8 +129,8 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "avx2"
     ))]
-    if haystack.len() >= 32 {
-        let result = nnap_avx2(haystack, &mut skip);
+    if len >= 32 {
+        let result = fpbi_avx2(bytes, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -144,8 +140,8 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "sse2"
     ))]
-    if (haystack.len() - skip) >= 16 {
-        let result = nnap_sse2(haystack, &mut skip);
+    if (len - skip) >= 16 {
+        let result = fpbi_sse2(bytes, &mut skip);
         if result.is_some() {
             return result;
         }
@@ -155,18 +151,15 @@ pub unsafe fn next_non_ascii_pos(haystack: &[u8]) -> Option<usize> {
         any(target_arch = "aarch64", target_arch = "arm64ec"), 
         target_feature = "neon"
     ))]
-    if haystack.len() >= 16 {
-        let result = nnap_neon(haystack, &mut skip);
+    if len >= 16 {
+        let result = fpbi_neon(bytes, &mut skip);
         if result.is_some() {
             return result;
         }
     }
     
-    // Search the remaining bytes for the needle.
-    haystack.iter()
-        .skip(skip)
-        .position(|b| *b & NEEDLE != 0)
-        .map(|result| skip + result)
+    // Now check the last (less than 16 or 32) bytes, with a normal loop.
+    (skip..len).find(|&i| super::test_sign_bit(bytes[i]))
 }
 
 #[cfg(all(
@@ -236,15 +229,15 @@ mod tests {
         target_feature = "avx2"
     ))]
     #[test]
-    fn nnap_avx2() {
-        const RESULTS: [(&[u8], usize); 2] = [
+    fn fpbi_avx2() {
+        const C_RESULTS: [(&[u8], usize); 2] = [
             (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
-        for (idx, result) in RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_RESULTS.into_iter().enumerate() {
             let mut tmp = 0;
-            let value = unsafe { super::nnap_avx2(result.0, &mut tmp) };
+            let value = unsafe { super::fpbi_avx2(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
         }
     }
@@ -254,15 +247,15 @@ mod tests {
         target_feature = "sse2"
     ))]
     #[test]
-    fn nnap_sse2() {
-        const RESULTS: [(&[u8], usize); 2] = [
+    fn fpbi_sse2() {
+        const C_RESULTS: [(&[u8], usize); 2] = [
             (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
-        for (idx, result) in RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_RESULTS.into_iter().enumerate() {
             let mut tmp = 0;
-            let value = unsafe { super::nnap_sse2(result.0, &mut tmp) };
+            let value = unsafe { super::fpbi_sse2(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
         }
     }
@@ -272,15 +265,15 @@ mod tests {
         target_feature = "neon"
     ))]
     #[test]
-    fn nnap_neon() {
-        const RESULTS: [(&[u8], usize); 2] = [
+    fn fpbi_neon() {
+        const C_RESULTS: [(&[u8], usize); 2] = [
             (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
         
-        for (idx, result) in RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_RESULTS.into_iter().enumerate() {
             let mut tmp = 0;
-            let value = unsafe { super::nnap_neon(result.0, &mut tmp) };
+            let value = unsafe { super::fpbi_neon(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
         }
     }
