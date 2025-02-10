@@ -15,10 +15,10 @@ fn handle_ascii(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
     }
 
     // Now check up to which index it is no longer an ASCII character.
-    if let Some(next_pos) = helper::find_pos_byte_idx(value) {
+    if let Some(next_idx) = helper::find_pos_byte_idx(value) {
         // Index found, now add all bytes up to this index.
-        result.extend_from_slice(&value[..next_pos]);
-        *value = &value[next_pos..];
+        result.extend_from_slice(&value[..next_idx]);
+        *value = &value[next_idx..];
         return false;
     }
 
@@ -27,23 +27,33 @@ fn handle_ascii(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
     true
 }
 
-/// Returns the compressed bytes or the bytes starting at the index with an error.
+#[derive(Debug)]
+pub enum CompressError {
+    InvalidOrMissingPrefix(Vec<u8>),
+}
+
+/// Returns the compressed bytes or `CompressError`.
 /// 
-/// Error: A non-ASCII character was found with an invalid or missing set.
-pub fn compress<T>(bytes: T) -> Result<Vec<u8>, Vec<u8>> 
+/// TIP: Use the `shrink_to_fit` function on the compressed bytes.
+pub fn compress<T>(bytes: T) -> Result<Vec<u8>, CompressError> 
 where 
     T: AsRef<[u8]>, 
 {
     let mut value = bytes.as_ref();
     let value_len = value.len();
-    let value_len_count = value_len / (u8::MAX as usize);
+    let data_len_count = value_len / 255;
+    let data_len_remainder = value_len % 255;
 
-    let mut result = Vec::<u8>::with_capacity(1 + value_len_count + value_len);
-    if value_len_count > 0 {
-        result.extend(vec![u8::MAX; value_len_count]);
+    let mut result = Vec::<u8>::with_capacity(data_len_count + 1 + value_len);
+    if data_len_count > 0 {
+        // We can use the unsafe functions, because we are using a larger
+        // capacity and this is our first data for this vector.
+        unsafe {
+            result.set_len(data_len_count);
+            result.as_mut_ptr().write_bytes(255, data_len_count);
+        }
     }
-    let value_len_remainder = value_len - ((u8::MAX as usize) * value_len_count);
-    result.push(value_len_remainder as u8);
+    result.push(data_len_remainder as u8);
 
     let mut last_utf8_prefix: &[u8] = &[];
 
@@ -51,9 +61,9 @@ where
         let utf8_value = utf8::Value::from(value);
 
         if utf8_value.unicode() == utf8::Unicode::Unknown {
-            // We found a non-ASCII character with an invalid or missing set.
+            // We found a non-ASCII character with an invalid or missing prefix.
             let err_result = value.iter().take(utf8::C_MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
-            return Err(err_result);
+            return Err(CompressError::InvalidOrMissingPrefix(err_result));
         }
         
         if utf8_value.unicode() == utf8::Unicode::Range00000_0007F {
@@ -70,53 +80,63 @@ where
         }
 
         result.push(utf8_value.char());
-        // We can use the unsafe function, which improves performance (tested),
+        // We can use the unsafe function `get_unchecked`,
         // because we know that `value` is at least `utf8_len` long.
-        value = unsafe { value.get_unchecked(utf8_len..) };
+        unsafe {
+            value = value.get_unchecked(utf8_len..);
+        }
     }
     
     Ok(result)
 }
 
-/// Returns the decompressed bytes or the bytes starting at the index with an error.
-/// 
-/// Error: A non-ASCII character was found with an invalid or missing set.
-pub fn decompress<T>(bytes: T) -> Result<Vec<u8>, Vec<u8>> 
+#[derive(Debug)]
+pub enum DecompressError {
+    MissingBytes,
+    MissingPrefix(Vec<u8>),
+}
+
+/// Returns the decompressed bytes or `DecompressError`.
+pub fn decompress<T>(bytes: T) -> Result<Vec<u8>, DecompressError> 
 where 
     T: AsRef<[u8]>, 
 {
     let mut value = bytes.as_ref();
-    let mut value_len = 0;
-    for i in 0..usize::MAX {
-        let len = value[i];
-
-        value_len += len as usize;
-
+    let mut data_len = 0;
+    for (idx, &len) in value.iter().enumerate() {
+        data_len += len as usize;
         if len < u8::MAX {
-            value = &value[(i + 1)..];
+            let new_idx = idx + 1;
+            if value.len() < new_idx {
+                return Err(DecompressError::MissingBytes);
+            }
+            value = &value[new_idx..];
             break;
         }
     }
 
-    let mut result = Vec::<u8>::with_capacity(value_len);
+    let mut result = Vec::<u8>::with_capacity(data_len);
 
     let mut last_utf8_prefix: &[u8] = &[];
 
     while !value.is_empty() {
         let utf8_value = utf8::Value::from(value);
-        let (mut utf8_len, mut utf8_char) = (1, value[0]);
+        let (utf8_len, utf8_char): (usize, u8);
         
         if utf8_value.unicode() == utf8::Unicode::Unknown {
             // We have found a utf8::Unicode::Unknown,
-            // which means we have a character with the same last set.
+            // which means we have a character with the same last prefix.
 
             if last_utf8_prefix.is_empty() {
                 // Should only happen if there was no set for the first non-ASCII character,
                 // as in this example: &[ 72, 101, 108, 108, 111, 32, 149 ]
-                //                                                    ^-Non-ASCII character without a set
+                //                                                    ^ Non-ASCII character without a prefix.
                 let err_result = value.iter().take(utf8::C_MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
-                return Err(err_result);
+                return Err(DecompressError::MissingPrefix(err_result));
             }
+
+            utf8_len = 1;
+            utf8_char = value[0];
         } else {
             if utf8_value.unicode() == utf8::Unicode::Range00000_0007F {
                 if handle_ascii(&mut value, &mut result) {
@@ -132,9 +152,11 @@ where
 
         result.extend_from_slice(last_utf8_prefix);
         result.push(utf8_char);
-
-        // TODO: Check why `unsafe { value.get_unchecked(utf8_len..) }` is slower here.
-        value = &value[utf8_len..];
+        // We can use the unsafe function `get_unchecked`,
+        // because we know that `value` is at least `utf8_len` long.
+        unsafe {
+            value = value.get_unchecked(utf8_len..);
+        }
     }
     
     Ok(result)

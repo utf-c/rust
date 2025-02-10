@@ -38,20 +38,17 @@ unsafe fn fpbi_avx2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
             bytes.len(),
             bytes.as_ptr()
         );
-        let mut idx = 0;
-
-        while idx + C_VEC_LEN <= len {
+        
+        for idx in (0..len).step_by(C_VEC_LEN) {
             let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
             let mask = x86::_mm256_movemask_epi8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
-
-            idx += C_VEC_LEN;
         }
 
-        *skip = idx;
+        *skip = len % C_VEC_LEN;
     }
     None
 }
@@ -69,20 +66,17 @@ unsafe fn fpbi_sse2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
             bytes.len(),
             bytes.as_ptr()
         );
-        let mut idx = *skip;
 
-        while idx + C_VEC_LEN <= len {
+        for idx in (*skip..len).step_by(C_VEC_LEN) {
             let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
             let mask = x86::_mm_movemask_epi8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
-            
-            idx += C_VEC_LEN;
         }
 
-        *skip = idx;
+        *skip = len % C_VEC_LEN;
     }
     None
 }
@@ -101,20 +95,17 @@ unsafe fn fpbi_neon(bytes: &[u8], skip: &mut usize) -> Option<usize> {
             bytes.len(),
             bytes.as_ptr()
         );
-        let mut idx = 0;
-
-        while idx + C_VEC_LEN <= len {
+        
+        for idx in (0..len).step_by(C_VEC_LEN) {
             let simd_vec = arm::vld1q_u8(ptr.add(idx));
             let mask = neon_movemask_epu8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
-            
-            idx += C_VEC_LEN;
         }
 
-        *skip = idx;
+        *skip = len % C_VEC_LEN;
     }
     None
 }
