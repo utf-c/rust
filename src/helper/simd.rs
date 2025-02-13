@@ -31,25 +31,26 @@ compile_error!("The required features for SIMD are not available. Please disable
 ))]
 unsafe fn fpbi_avx2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
     const C_VEC_LEN: usize = 32;
-    
+
     // We use this macro to check at runtime whether the CPU feature "avx2" is available.
     if is_x86_feature_detected!("avx2") {
-        let (len, ptr) = (
-            bytes.len(),
-            bytes.as_ptr()
-        );
-        
-        for idx in (0..len).step_by(C_VEC_LEN) {
+        let (len, ptr) = (bytes.len(), bytes.as_ptr());
+        let (mut idx, end_idx) = (0, len - C_VEC_LEN);
+
+        while idx <= end_idx {
             let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
             let mask = x86::_mm256_movemask_epi8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
+
+            idx += C_VEC_LEN;
         }
 
-        *skip = len % C_VEC_LEN;
+        *skip = idx;
     }
+    
     None
 }
 
@@ -59,25 +60,26 @@ unsafe fn fpbi_avx2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
 ))]
 unsafe fn fpbi_sse2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
     const C_VEC_LEN: usize = 16;
-
+    
     // We use this macro to check at runtime whether the CPU feature "sse2" is available.
     if is_x86_feature_detected!("sse2") {
-        let (len, ptr) = (
-            bytes.len(),
-            bytes.as_ptr()
-        );
+        let (len, ptr) = (bytes.len(), bytes.as_ptr());
+        let (mut idx, end_idx) = (*skip, len - C_VEC_LEN);
 
-        for idx in (*skip..len).step_by(C_VEC_LEN) {
+        while idx <= end_idx {
             let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
             let mask = x86::_mm_movemask_epi8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
+            
+            idx += C_VEC_LEN;
         }
 
-        *skip = len % C_VEC_LEN;
+        *skip = idx;
     }
+    
     None
 }
 
@@ -85,56 +87,50 @@ unsafe fn fpbi_sse2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
     any(target_arch = "aarch64", target_arch = "arm64ec"), 
     target_feature = "neon"
 ))]
-#[inline(always)]
 unsafe fn fpbi_neon(bytes: &[u8], skip: &mut usize) -> Option<usize> {
     const C_VEC_LEN: usize = 16;
 
     // We use this macro to check at runtime whether the CPU feature "neon" is available.
     if std::arch::is_aarch64_feature_detected!("neon") {
-        let (len, ptr) = (
-            bytes.len(),
-            bytes.as_ptr()
-        );
-        
-        for idx in (0..len).step_by(C_VEC_LEN) {
+        let (len, ptr) = (bytes.len(), bytes.as_ptr());
+        let (mut idx, end_idx) = (0, len - C_VEC_LEN);
+
+        while idx <= end_idx {
             let simd_vec = arm::vld1q_u8(ptr.add(idx));
             let mask = neon_movemask_epu8(simd_vec);
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
+
+            idx += C_VEC_LEN;
         }
 
-        *skip = len % C_VEC_LEN;
+        *skip = idx;
     }
+
     None
 }
 
 pub unsafe fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
-    let len = bytes.len();
-    // The number of bytes to skip.
-    // As an example: If AVX2 has already checked 32 bytes, SSE2 should skip these 32.
-    let mut skip = 0;
+    let (len, mut skip) = (bytes.len(), 0);
 
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        target_feature = "avx2"
-    ))]
-    if len >= 32 {
-        let result = fpbi_avx2(bytes, &mut skip);
-        if result.is_some() {
-            return result;
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        #[cfg(target_feature = "avx2")]
+        if len >= 32 {
+            let result = fpbi_avx2(bytes, &mut skip);
+            if result.is_some() {
+                return result;
+            }
         }
-    }
 
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        target_feature = "sse2"
-    ))]
-    if (len - skip) >= 16 {
-        let result = fpbi_sse2(bytes, &mut skip);
-        if result.is_some() {
-            return result;
+        #[cfg(target_feature = "sse2")]
+        if (len - skip) >= 16 {
+            let result = fpbi_sse2(bytes, &mut skip);
+            if result.is_some() {
+                return result;
+            }
         }
     }
 
@@ -215,18 +211,18 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    const C_TEST_CASES: [(&[u8], usize); 2] = [
+            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
+            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
+        ];
+    
     #[cfg(all(
         any(target_arch = "x86", target_arch = "x86_64"), 
         target_feature = "avx2"
     ))]
     #[test]
     fn fpbi_avx2() {
-        const C_RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
-            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
-        ];
-        
-        for (idx, result) in C_RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
             let mut tmp = 0;
             let value = unsafe { super::fpbi_avx2(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
@@ -239,12 +235,7 @@ mod tests {
     ))]
     #[test]
     fn fpbi_sse2() {
-        const C_RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
-            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
-        ];
-        
-        for (idx, result) in C_RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
             let mut tmp = 0;
             let value = unsafe { super::fpbi_sse2(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
@@ -257,12 +248,7 @@ mod tests {
     ))]
     #[test]
     fn fpbi_neon() {
-        const C_RESULTS: [(&[u8], usize); 2] = [
-            (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
-            (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
-        ];
-        
-        for (idx, result) in C_RESULTS.into_iter().enumerate() {
+        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
             let mut tmp = 0;
             let value = unsafe { super::fpbi_neon(result.0, &mut tmp) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);

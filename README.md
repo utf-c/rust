@@ -5,10 +5,7 @@
 UTF-C is a compression for short UTF-8 messages with non-ASCII characters (See the [comparisons](https://github.com/utf-c/rust?tab=readme-ov-file#comparisons) below).
 
 > [!NOTE]
-> Here you can find texts translated with [Google Translate](https://translate.google.com/).
-
-> [!TIP]
-> Use our `helper::only_ascii()` function (If possible together with the SIMD feature) to check if the bytes consist only of ASCII characters and skip compression.
+> The texts used here in various languages ​​were translated with [Google Translate](https://translate.google.com/).
 
 ## Examples
 ### `Ζω στην Ευρώπη`
