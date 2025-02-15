@@ -1,49 +1,6 @@
 #[cfg(feature = "simd")]
 mod simd;
 
-/// Get the original length of the text using the compressed bytes.
-/// 
-/// Set a limit if necessary. A limit ends the loop within this function at a value of `limit_opt`.
-/// 
-/// __NOTE:__ `limit_opt` represents the length of bytes after decompression, not the index.
-/// 
-/// Computes in **O(n¹)** time.
-/// 
-/// # Example
-/// ```
-/// use utf_c::{compress, helper::length_from_compressed};
-/// let text = "🅗🅔🅛🅛🅞 🅦🅞🅡🅛🅓";
-/// let text_len = text.len();
-/// let bytes = compress(text).unwrap();
-/// let bytes_len = length_from_compressed(bytes, None);
-/// assert_eq!(bytes_len, text_len);
-/// ```
-pub fn length_from_compressed<T>(bytes: T, limit_opt: Option<usize>) -> usize
-where 
-    T: AsRef<[u8]>,
-{
-    let value = bytes.as_ref();
-    let mut result = 0;
-
-    if let Some(limit) = limit_opt {
-        for &byte in value {
-            result += byte as usize;
-            if byte < 255 || result >= limit {
-                break;
-            }
-        }
-    } else {
-        for &byte in value {
-            result += byte as usize;
-            if byte < 255 {
-                break;
-            }
-        }
-    }
-
-    result
-}
-
 /// This function uses SIMD (if the feature is enabled, otherwise a normal loop is used) to find a non-ASCII character 
 /// and returns `true` if one is found, otherwise `false`.
 /// 
@@ -95,37 +52,11 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
 #[inline(always)]
 pub(crate) fn test_sign_bit(byte: u8) -> bool {
     // NOTE: ASCII characters have a value of 0-127, which means that the sign bit is never set.
-    const C_NEEDLE: u8 = 0b10000000;
-    (byte & C_NEEDLE) != 0
+    (byte & 0b10000000) != 0
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn length_from_compressed() {
-        let test_cases_no_limit: [(&[u8], usize); 3] = [
-            (&[163], (163)),
-            (&[255, 163], (255 + 163)),
-            (&[255, 255, 163], (255 + 255 + 163)),
-        ];
-        let test_cases_limit: [(&[u8], usize, usize); 4] = [
-            (&[163], (163), 1),
-            (&[255, 163], (255 + 163), 418),
-            (&[255, 255, 163], (255 + 255 + 163), 673),
-            (&[255, 255, 255, 163], (255 + 255 + 255), 765),
-        ];
-
-        for (idx, &(bytes, len)) in test_cases_no_limit.iter().enumerate() {
-            let result = super::length_from_compressed(bytes, None);
-            assert!(len == result, "test_case_no_limit failed at: {}", idx);
-        }
-
-        for (idx, &(bytes, len, limit)) in test_cases_limit.iter().enumerate() {
-            let result = super::length_from_compressed(bytes, Some(limit));
-            assert!(len == result, "test_case_limit failed at: {}", idx);
-        }
-    }
-
     #[test]
     fn contains_non_ascii() {
         let test_cases: [(&[u8], bool); 13]  = [

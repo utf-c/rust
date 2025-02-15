@@ -27,7 +27,7 @@ fn handle_ascii(value: &mut &[u8], result: &mut Vec<u8>) -> bool {
     true
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CompressError {
     InvalidLength,
     InvalidOrMissingPrefix(Vec<u8>),
@@ -79,7 +79,7 @@ where
 
         if utf8_unicode == utf8::Unicode::Unknown {
             // We found a non-ASCII character with an invalid or missing prefix.
-            let err_result = value.iter().take(utf8::C_MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
+            let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
             return Err(CompressError::InvalidOrMissingPrefix(err_result));
         }
         
@@ -107,7 +107,7 @@ where
     Ok(result)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum DecompressError {
     InvalidLength,
     MissingBytes,
@@ -168,7 +168,7 @@ where
                 // Should only happen if there was no set for the first non-ASCII character,
                 // as in this example: &[ 72, 101, 108, 108, 111, 32, 149 ]
                 //                                                    ^ Non-ASCII character without a prefix.
-                let err_result = value.iter().take(utf8::C_MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
+                let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
                 return Err(DecompressError::MissingPrefix(err_result));
             }
 
@@ -225,7 +225,7 @@ mod tests {
             let compressed_result = super::compress(text);
             assert!(compressed_result.is_ok(), "Compression failed for: {}", text);
             let compressed_bytes = compressed_result.unwrap();
-            assert!(compressed_bytes == pre_compressed_bytes, "Compressed bytes does not match for: {:?}", compressed_bytes);
+            assert!(compressed_bytes == pre_compressed_bytes, "Compressed bytes does not match for: {}", text);
 
             // Decompression
             let decompressed_result = super::decompress(&compressed_bytes);

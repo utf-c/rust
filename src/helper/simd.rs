@@ -6,8 +6,8 @@ use std::arch::x86_64 as x86;
 use core::arch::aarch64 as arm;
 
 #[cfg(not(any(
-    any(target_arch = "x86", target_arch = "x86_64"), 
-    any(target_arch = "aarch64", target_arch = "arm64ec"),
+    target_arch = "x86", target_arch = "x86_64", 
+    target_arch = "aarch64", target_arch = "arm64ec",
 )))]
 compile_error!("The current arch is not supported. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
@@ -15,7 +15,7 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
     // x86
     all(
         any(target_arch = "x86", target_arch = "x86_64"), 
-        any(target_feature = "avx2", target_feature = "sse2"),
+        any(target_feature = "sse2", target_feature = "avx2"),
     ), 
     // arm
     all(
@@ -26,133 +26,111 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
 compile_error!("The required features for SIMD are not available. Please disable the \"simd\" feature for utf-c, to get the best possible experience.");
 
 #[cfg(all(
-    any(target_arch = "x86", target_arch = "x86_64"), 
-    target_feature = "avx2"
+    feature = "simd_extra",
+    target_feature = "avx2",
 ))]
-unsafe fn fpbi_avx2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
-    const C_VEC_LEN: usize = 32;
+unsafe fn fpbi_search_extra(bytes: &[u8], skip: &mut usize) -> Option<usize> {
+    const VEC_LEN: usize = 32;
 
-    // We use this macro to check at runtime whether the CPU feature "avx2" is available.
+    // We need to check at runtime whether the currently used processor supports this feature.
     if is_x86_feature_detected!("avx2") {
         let (len, ptr) = (bytes.len(), bytes.as_ptr());
-        let (mut idx, end_idx) = (0, len - C_VEC_LEN);
+        let (mut idx, end_idx) = (0, len - VEC_LEN);
 
         while idx <= end_idx {
             let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
             let mask = x86::_mm256_movemask_epi8(simd_vec);
+
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
 
-            idx += C_VEC_LEN;
+            idx += VEC_LEN;
         }
-
+        
         *skip = idx;
     }
     
     None
 }
 
-#[cfg(all(
-    any(target_arch = "x86", target_arch = "x86_64"), 
-    target_feature = "sse2"
+#[cfg(any(
+    target_feature = "sse2",
+    target_feature = "neon",
 ))]
-unsafe fn fpbi_sse2(bytes: &[u8], skip: &mut usize) -> Option<usize> {
-    const C_VEC_LEN: usize = 16;
-    
-    // We use this macro to check at runtime whether the CPU feature "sse2" is available.
-    if is_x86_feature_detected!("sse2") {
+unsafe fn fpbi_search(bytes: &[u8], skip: &mut usize) -> Option<usize> {
+    const VEC_LEN: usize = 16;
+
+    // We need to check at runtime whether the currently used processor supports this feature.
+    #[cfg(target_feature = "sse2")]
+    let feature_detected = is_x86_feature_detected!("sse2");
+    #[cfg(target_feature = "neon")]
+    let feature_detected = std::arch::is_aarch64_feature_detected!("neon");
+
+    if feature_detected {
         let (len, ptr) = (bytes.len(), bytes.as_ptr());
-        let (mut idx, end_idx) = (*skip, len - C_VEC_LEN);
+        let (mut idx, end_idx) = (*skip, len - VEC_LEN);
 
         while idx <= end_idx {
-            let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
-            let mask = x86::_mm_movemask_epi8(simd_vec);
+            let mask;
+
+            #[cfg(target_feature = "sse2")]
+            {
+                let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
+                mask = x86::_mm_movemask_epi8(simd_vec);
+            }
+
+            #[cfg(target_feature = "neon")]
+            {
+                let simd_vec = arm::vld1q_u8(ptr.add(idx));
+                mask = neon_movemask_epu8(simd_vec);
+            }
+            
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
             
-            idx += C_VEC_LEN;
+            idx += VEC_LEN;
         }
 
         *skip = idx;
     }
     
-    None
-}
-
-#[cfg(all(
-    any(target_arch = "aarch64", target_arch = "arm64ec"), 
-    target_feature = "neon"
-))]
-unsafe fn fpbi_neon(bytes: &[u8], skip: &mut usize) -> Option<usize> {
-    const C_VEC_LEN: usize = 16;
-
-    // We use this macro to check at runtime whether the CPU feature "neon" is available.
-    if std::arch::is_aarch64_feature_detected!("neon") {
-        let (len, ptr) = (bytes.len(), bytes.as_ptr());
-        let (mut idx, end_idx) = (0, len - C_VEC_LEN);
-
-        while idx <= end_idx {
-            let simd_vec = arm::vld1q_u8(ptr.add(idx));
-            let mask = neon_movemask_epu8(simd_vec);
-            if mask != 0 {
-                let result = idx + (mask.trailing_zeros() as usize);
-                return Some(result);
-            }
-
-            idx += C_VEC_LEN;
-        }
-
-        *skip = idx;
-    }
-
     None
 }
 
 pub unsafe fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
     let (len, mut skip) = (bytes.len(), 0);
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        #[cfg(target_feature = "avx2")]
-        if len >= 32 {
-            let result = fpbi_avx2(bytes, &mut skip);
-            if result.is_some() {
-                return result;
-            }
-        }
-
-        #[cfg(target_feature = "sse2")]
-        if (len - skip) >= 16 {
-            let result = fpbi_sse2(bytes, &mut skip);
-            if result.is_some() {
-                return result;
-            }
-        }
-    }
-
     #[cfg(all(
-        any(target_arch = "aarch64", target_arch = "arm64ec"), 
-        target_feature = "neon"
+        feature = "simd_extra",
+        target_feature = "avx2",
     ))]
-    if len >= 16 {
-        let result = fpbi_neon(bytes, &mut skip);
+    if len >= 32 {
+        let result = fpbi_search_extra(bytes, &mut skip);
         if result.is_some() {
             return result;
         }
     }
-    
+
+    #[cfg(any(
+        target_feature = "sse2",
+        target_feature = "neon",
+    ))]
+    if (len - skip) >= 16 {
+        let result = fpbi_search(bytes, &mut skip);
+        if result.is_some() {
+            return result;
+        }
+    }
+
     // Now check the last (less than 16 or 32) bytes, with a normal loop.
     (skip..len).find(|&i| super::test_sign_bit(bytes[i]))
 }
 
-#[cfg(all(
-    any(target_arch = "aarch64", target_arch = "arm64ec"), 
-    target_feature = "neon"
-))]
+#[cfg(target_feature = "neon")]
 /// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
 /// 
 /// [Click here for more details about `_mm_movemask_epi8`](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movemask_epi8&ig_expand=4602)
@@ -211,47 +189,25 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    const C_TEST_CASES: [(&[u8], usize); 2] = [
+    const TEST_CASES: [(&[u8], usize); 2] = [
             (&[ 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ], 5),
             (&[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128 ], 31),
         ];
     
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        target_feature = "avx2"
-    ))]
     #[test]
-    fn fpbi_avx2() {
-        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
-            let mut tmp = 0;
-            let value = unsafe { super::fpbi_avx2(result.0, &mut tmp) };
+    fn fpbi_search() {
+        for (idx, result) in TEST_CASES.into_iter().enumerate() {
+            let value = unsafe { super::fpbi_search(result.0, &mut 0) };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
-        }
-    }
 
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"), 
-        target_feature = "sse2"
-    ))]
-    #[test]
-    fn fpbi_sse2() {
-        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
-            let mut tmp = 0;
-            let value = unsafe { super::fpbi_sse2(result.0, &mut tmp) };
-            assert_eq!(value, Some(result.1), "failed at index {}", idx);
-        }
-    }
-
-    #[cfg(all(
-        any(target_arch = "aarch64", target_arch = "arm64ec"), 
-        target_feature = "neon"
-    ))]
-    #[test]
-    fn fpbi_neon() {
-        for (idx, result) in C_TEST_CASES.into_iter().enumerate() {
-            let mut tmp = 0;
-            let value = unsafe { super::fpbi_neon(result.0, &mut tmp) };
-            assert_eq!(value, Some(result.1), "failed at index {}", idx);
+            #[cfg(all(
+                feature = "simd_extra",
+                target_feature = "avx2",
+            ))]
+            {
+                let value = unsafe { super::fpbi_search_extra(result.0, &mut 0) };
+                assert_eq!(value, Some(result.1), "failed at index {}", idx);
+            }
         }
     }
 }
