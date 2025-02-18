@@ -38,8 +38,11 @@ unsafe fn fpbi_search_extra(bytes: &[u8], skip: &mut usize) -> Option<usize> {
         let (mut idx, end_idx) = (0, len - VEC_LEN);
 
         while idx <= end_idx {
-            let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
-            let mask = x86::_mm256_movemask_epi8(simd_vec);
+            let mask;
+            unsafe {
+                let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
+                mask = x86::_mm256_movemask_epi8(simd_vec);
+            }
 
             if mask != 0 {
                 let result = idx + (mask.trailing_zeros() as usize);
@@ -76,13 +79,13 @@ unsafe fn fpbi_search(bytes: &[u8], skip: &mut usize) -> Option<usize> {
             let mask;
 
             #[cfg(target_feature = "sse2")]
-            {
+            unsafe {
                 let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
                 mask = x86::_mm_movemask_epi8(simd_vec);
             }
 
             #[cfg(target_feature = "neon")]
-            {
+            unsafe {
                 let simd_vec = arm::vld1q_u8(ptr.add(idx));
                 mask = neon_movemask_epu8(simd_vec);
             }
@@ -109,7 +112,7 @@ pub unsafe fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
         target_feature = "avx2",
     ))]
     if len >= 32 {
-        let result = fpbi_search_extra(bytes, &mut skip);
+        let result = unsafe { fpbi_search_extra(bytes, &mut skip) };
         if result.is_some() {
             return result;
         }
@@ -120,7 +123,7 @@ pub unsafe fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
         target_feature = "neon",
     ))]
     if (len - skip) >= 16 {
-        let result = fpbi_search(bytes, &mut skip);
+        let result = unsafe { fpbi_search(bytes, &mut skip) };
         if result.is_some() {
             return result;
         }
@@ -140,50 +143,50 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
      * https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
      */
     
-    // We shift the bits of all elements (N=7) to the right.
-    let shift_u8 = arm::vshrq_n_u8(value, 7);
-    // We now turn the vector 16x-u8 into a 8x-u16.
-    let vec_8x16 = arm::vreinterpretq_u16_u8(shift_u8);
-
-    // We now pass the same vector twice to shift the bits of all elements
-    // in one of these vectors (N=7) to the right and accumulate them with the other.
-    let shift_u16 = arm::vsraq_n_u16(vec_8x16, vec_8x16, 7);
-    // We now turn the vector 8x-u16 into a 4x-u32.
-    let vec_4x32 = arm::vreinterpretq_u32_u16(shift_u16);
-
-    // We now pass the same vector twice to shift the bits of all elements
-    // in one of these vectors (N=14) to the right and accumulate them with the other.
-    let shift_u32 = arm::vsraq_n_u32(vec_4x32, vec_4x32, 14);
-    // We now turn the vector 4x-u32 into a 2x-u64.
-    let vec_2x64 = arm::vreinterpretq_u64_u32(shift_u32);
-
-    // We now pass the same vector twice to shift the bits of all elements
-    // in one of these vectors (N=28) to the right and accumulate them with the other.
-    let shift_u64 = arm::vsraq_n_u64(vec_2x64, vec_2x64, 28);
-    // Finally, we turn the vector 2x-u64 back into a 16x-u8.
-    let vec_16x8 = arm::vreinterpretq_u8_u64(shift_u64);
-
-    // Now we extract two elements (our "low" and "high") to get our result.
-    // NOTE: To understand why there are differences here, look at the theory.
     let (low, high): (u8, u8);
-    #[cfg(target_endian = "little")]
-    {
-        (low, high) = (
-            arm::vgetq_lane_u8(vec_16x8, 0),
-            arm::vgetq_lane_u8(vec_16x8, 8),
-        );
-    }
-    #[cfg(target_endian = "big")]
-    {
-        // To get the correct result with "big endian", we have to reverse the bits of all elements.
-        let reversed = arm::vrbitq_u8(vec_16x8);
-        (low, high) = (
-            arm::vgetq_lane_u8(reversed, 7),
-            arm::vgetq_lane_u8(reversed, 15),
-        );
-    }
-    
-    // Our final result:
+    unsafe {
+        // We shift the bits of all elements (N=7) to the right.
+        let shift_u8 = arm::vshrq_n_u8(value, 7);
+        // We now turn the vector 16x-u8 into a 8x-u16.
+        let vec_8x16 = arm::vreinterpretq_u16_u8(shift_u8);
+
+        // We now pass the same vector twice to shift the bits of all elements
+        // in one of these vectors (N=7) to the right and accumulate them with the other.
+        let shift_u16 = arm::vsraq_n_u16(vec_8x16, vec_8x16, 7);
+        // We now turn the vector 8x-u16 into a 4x-u32.
+        let vec_4x32 = arm::vreinterpretq_u32_u16(shift_u16);
+
+        // We now pass the same vector twice to shift the bits of all elements
+        // in one of these vectors (N=14) to the right and accumulate them with the other.
+        let shift_u32 = arm::vsraq_n_u32(vec_4x32, vec_4x32, 14);
+        // We now turn the vector 4x-u32 into a 2x-u64.
+        let vec_2x64 = arm::vreinterpretq_u64_u32(shift_u32);
+
+        // We now pass the same vector twice to shift the bits of all elements
+        // in one of these vectors (N=28) to the right and accumulate them with the other.
+        let shift_u64 = arm::vsraq_n_u64(vec_2x64, vec_2x64, 28);
+        // Finally, we turn the vector 2x-u64 back into a 16x-u8.
+        let vec_16x8 = arm::vreinterpretq_u8_u64(shift_u64);
+
+        // Now we extract two elements (our "low" and "high") to get our result.
+        // NOTE: To understand why there are differences here, look at the theory.
+        #[cfg(target_endian = "little")]
+        {
+            (low, high) = (
+                arm::vgetq_lane_u8(vec_16x8, 0),
+                arm::vgetq_lane_u8(vec_16x8, 8),
+            );
+        }
+        #[cfg(target_endian = "big")]
+        {
+            // To get the correct result with "big endian", we have to reverse the bits of all elements.
+            let reversed = arm::vrbitq_u8(vec_16x8);
+            (low, high) = (
+                arm::vgetq_lane_u8(reversed, 7),
+                arm::vgetq_lane_u8(reversed, 15),
+            );
+        }
+    } // unsafe
     ((high as u16) << 8) | (low as u16)
 }
 
