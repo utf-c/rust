@@ -12,7 +12,14 @@ exclude = [".github/", ".cargo/"]
 
 [dependencies]
 
+[dev-dependencies]
+criterion = { version = "0.5.1", default-features = false, features = ["cargo_bench_support"] }
+
 [features]
 default = ["simd"]
 simd = []
 simd_extra = []
+
+[[bench]]
+name = "bench"
+harness = false
