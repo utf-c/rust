@@ -19,8 +19,11 @@ jobs:
         cargo --version --verbose
         rustc --version
     
-    - name: Print(target-features)
+    - name: Print target-features
       run: rustc --print target-features
 
-    - name: Test
-      run: cargo test --all-targets
+    - name: Run test
+      run: cargo test
+    
+    - name: Run bench
+      run: cargo bench
