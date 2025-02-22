@@ -42,7 +42,28 @@ where
 /// Returns the index of the first byte that has the sign bit set to `1` (value greater than 127), otherwise `None`.
 pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
     #[cfg(feature = "simd")]
-    return unsafe { simd::find_pos_byte_idx(bytes) };
+    return { 
+        let (len, mut skip) = (bytes.len(), 0);
+        let mut fpbi = simd::FindPositiveByteIndex::from((bytes, &mut skip));
+
+        #[cfg(feature = "simd_extra")]
+        if len >= simd::FindPositiveByteIndex::VEC_LEN_EXTRA {
+            let result = unsafe { fpbi.extra() };
+            if result.is_some() {
+                return result;
+            }
+        }
+
+        if len >= simd::FindPositiveByteIndex::VEC_LEN {
+            let result = unsafe { fpbi.normal() };
+            if result.is_some() {
+                return result;
+            }
+        }
+        
+        // Now check the remaining bytes.
+        (skip..len).find(|&i| test_sign_bit(bytes[i]))
+    };
 
     #[cfg(not(feature = "simd"))]
     return bytes.iter().position(|b| test_sign_bit(*b));
@@ -50,7 +71,7 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
 
 /// Returns `true` if the sign bit is set, otherwise `false`.
 #[inline(always)]
-pub(crate) fn test_sign_bit(byte: u8) -> bool {
+pub(crate) const fn test_sign_bit(byte: u8) -> bool {
     // NOTE: ASCII characters have a value of 0-127, which means that the sign bit is never set.
     (byte & 0b10000000) != 0
 }

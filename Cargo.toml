@@ -3,10 +3,11 @@ name = "utf-c"
 version = "0.2.0"
 authors = ["Nick Ilhan Atamgüc <nickatamguec@outlook.com>"]
 edition = "2024"
-description = "A very small and simple compression for short UTF-8 texts"
+rust-version = "1.85.0"
+description = "A very small and simple compression for UTF-8"
 repository = "https://github.com/utf-c/rust"
 license = "MIT"
-keywords = ["utf", "utf8", "utf-8", "utf-c", "compression"]
+keywords = ["utf8", "utf-8", "utfc", "utf-c", "compression"]
 categories = ["compression"]
 exclude = [".github/", ".cargo/"]
 
@@ -17,7 +18,9 @@ criterion = { version = "0.5.1", default-features = false, features = ["cargo_be
 
 [features]
 default = ["simd"]
+# Use SSE2 or NEON
 simd = []
+# Use AVX2 (Requires the "simd" feature)
 simd_extra = []
 
 [[bench]]

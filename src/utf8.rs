@@ -1,7 +1,8 @@
-const UTF8_1_BYTES: [u8; 1] = [0b0];                       // 00000-0007F
-const UTF8_2_BYTES: [u8; 2] = [0b110, 0b10];               // 00080-007FF
-const UTF8_3_BYTES: [u8; 3] = [0b1110, 0b10, 0b10];        // 00800-0FFFF
-const UTF8_4_BYTES: [u8; 4] = [0b11110, 0b10, 0b10, 0b10]; // 10000-1FFFF
+// All bits in the following arrays represent the high bits of the bytes:
+const UTF8_1_BYTES: [u8; 1] = [ 0b0                       ]; // 00000-0007F
+const UTF8_2_BYTES: [u8; 2] = [ 0b110,   0b10             ]; // 00080-007FF
+const UTF8_3_BYTES: [u8; 3] = [ 0b1110,  0b10, 0b10       ]; // 00800-0FFFF
+const UTF8_4_BYTES: [u8; 4] = [ 0b11110, 0b10, 0b10, 0b10 ]; // 10000-1FFFF
 /// The maximum length of bytes per character.
 pub const MAX_UTF8_BYTES: usize = 4;
 
@@ -28,7 +29,7 @@ impl<'a> Value<'a> {
     }
     
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self.1 {
             Unicode::Unknown => 0,
             Unicode::Range00000_0007F => 1,
@@ -76,25 +77,25 @@ impl<'a> From<&'a [u8]> for Value<'a> {
 }
 
 #[inline(always)]
-fn is_1_bytes(values: &[u8]) -> bool {
+const fn is_1_bytes(values: &[u8]) -> bool {
     (values[0] >> 7) == UTF8_1_BYTES[0]
 }
 
 #[inline(always)]
-fn is_2_bytes(values: &[u8]) -> bool {
+const fn is_2_bytes(values: &[u8]) -> bool {
     (values[0] >> 5) == UTF8_2_BYTES[0] && 
     (values[1] >> 6) == UTF8_2_BYTES[1]
 }
 
 #[inline(always)]
-fn is_3_bytes(values: &[u8]) -> bool {
+const fn is_3_bytes(values: &[u8]) -> bool {
     (values[0] >> 4) == UTF8_3_BYTES[0] && 
     (values[1] >> 6) == UTF8_3_BYTES[1] && 
     (values[2] >> 6) == UTF8_3_BYTES[2]
 }
 
 #[inline(always)]
-fn is_4_bytes(values: &[u8]) -> bool {
+const fn is_4_bytes(values: &[u8]) -> bool {
     (values[0] >> 3) == UTF8_4_BYTES[0] && 
     (values[1] >> 6) == UTF8_4_BYTES[1] && 
     (values[2] >> 6) == UTF8_4_BYTES[2] && 

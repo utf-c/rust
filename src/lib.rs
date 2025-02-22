@@ -1,6 +1,10 @@
 /* private modules */
 mod utf8;
 
+/* private macros */
+#[macro_use]
+mod macros;
+
 /* public modules */
 pub mod helper;
 
