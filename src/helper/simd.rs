@@ -27,15 +27,16 @@ impl FindPositiveByteIndex<'_, '_> {
     #[cfg(feature = "simd_extra")]
     pub const VEC_LEN_EXTRA: usize = 32;
 
-    fn r#loop<F>(&mut self, vec_len: usize, mask_cb: F) -> Option<usize> 
+    fn r#loop<T, F>(&mut self, vec_len: usize, mask_cb: F) -> Option<usize> 
     where 
-        F: Fn(&usize, *const u8) -> i32,
+        T: Into<i32>,
+        F: Fn(&usize, *const u8) -> T,
     {
         let (len, ptr) = (self.bytes.len(), self.bytes.as_ptr());
         let end_idx = len - vec_len;
 
         while *self.index <= end_idx {
-            let mask = mask_cb(self.index, ptr);
+            let mask = mask_cb(self.index, ptr).into();
 
             if mask != 0 {
                 let result = *self.index + (mask.trailing_zeros() as usize);
@@ -98,7 +99,7 @@ impl<'a, 'b> From<(&'a [u8], &'b mut usize)> for FindPositiveByteIndex<'a, 'b> {
 /// An alternative to `_mm_movemask_epi8` (SSE2) for NEON.
 /// 
 /// [Click here for more details about `_mm_movemask_epi8`](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movemask_epi8&ig_expand=4602)
-unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> i32 {
+unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
     /*
      * For more details and the "big endian" theory:
      * https://github.com/utf-c/neon_movemask_epu8/blob/main/README.md
@@ -148,7 +149,7 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> i32 {
             );
         }
     } // unsafe
-    ((high as i32) << 8) | (low as i32)
+    ((high as u16) << 8) | (low as u16)
 }
 
 #[cfg(test)]
