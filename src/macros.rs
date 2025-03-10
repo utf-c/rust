@@ -6,7 +6,7 @@ macro_rules! init_features {
         macro_rules! feature_detected {
             $(
                 ($feature_mode) => {
-                    $macro!($feature)
+                    std::arch::$macro!($feature)
                 };
             )*
             ($unknown_feature_mode:tt) => {
