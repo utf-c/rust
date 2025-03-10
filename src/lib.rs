@@ -64,7 +64,13 @@ where
     let data_len_count = value_len / 255;
     let data_len_remainder = value_len % 255;
 
-    let mut result = Vec::<u8>::with_capacity(data_len_count + 1 + value_len);
+    let mut result = Vec::<u8>::with_capacity(
+        data_len_count +
+        1              + // The value of `data_len_remainder`.
+        // We should use at least the uncompressed length to avoid multiple reallocations.
+        // For this reason, we recommend calling the function `shrink_to_fit` on the compressed bytes.
+        value_len
+    );
     if data_len_count > 0 {
         // We can use the unsafe functions, because we are using a larger
         // capacity and this is our first data for this vector.
@@ -77,35 +83,38 @@ where
 
     let mut last_utf8_prefix: &[u8] = &[];
 
-    while !value.is_empty() {
+    'heart: while !value.is_empty() {
         let utf8_value = utf8::Value::from(value);
-        let utf8_unicode = utf8_value.unicode();
 
-        if utf8_unicode == utf8::Unicode::Unknown {
-            // We found a non-ASCII character with an invalid or missing prefix.
-            let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
-            return Err(CompressError::InvalidOrMissingPrefix(err_result));
-        }
-        
-        if utf8_unicode == utf8::Unicode::Range00000_0007F {
-            if handle_ascii(&mut value, &mut result) {
-                break;
+        match utf8_value.unicode() {
+            utf8::Unicode::Unknown => {
+                // We found a non-ASCII character with an invalid or missing prefix.
+                let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
+                return Err(CompressError::InvalidOrMissingPrefix(err_result));
+            },
+            utf8::Unicode::Range00000_0007F => {
+                if handle_ascii(&mut value, &mut result) {
+                    // No characters left.
+                    break 'heart;
+                }
+                continue 'heart;
+            },
+            _ => {
+                let utf8_prefix = utf8_value.prefix();
+                if last_utf8_prefix != utf8_prefix {
+                    last_utf8_prefix = utf8_prefix;
+                    result.extend_from_slice(utf8_prefix);
+                }
             }
-            continue;
-        }
-        
-        let (utf8_prefix, utf8_len) = (utf8_value.prefix(), utf8_value.len());
-        if last_utf8_prefix != utf8_prefix {
-            last_utf8_prefix = utf8_prefix;
-            result.extend_from_slice(utf8_prefix);
         }
 
-        result.push(utf8_value.char());
-        // We can use the unsafe function `get_unchecked`,
-        // because we know that `value` is at least `utf8_len` long.
-        unsafe {
-            value = value.get_unchecked(utf8_len..);
-        }
+        let utf8_char = utf8_value.char();
+        result.push(utf8_char);
+        // We can use `unsafe` here because we know the length.
+        value = unsafe {
+            let utf8_len = utf8_value.len();
+            value.get_unchecked(utf8_len..)
+        };
     }
     
     Ok(result)
@@ -139,65 +148,65 @@ where
         return Err(DecompressError::InvalidLength);
     }
 
-    let data_len = unsafe {
-        let mut idx = 0;
-        loop {
-            if value_len == idx {
-                return Err(DecompressError::MissingBytes);
-            }
-            if *value.get_unchecked(idx) < 255 {
-                break;
-            }
-            idx += 1;
+    let mut data_len = 0;
+    for idx in 0..=value_len {
+        if value_len == idx {
+            return Err(DecompressError::MissingBytes);
         }
-        let remainder = *value.get_unchecked(idx);
-        value = value.get_unchecked((idx + 1)..);
-        (idx * 255) + (remainder as usize)
-    };
+
+        let byte = value[idx];
+        if byte < 255 {
+            if idx > 1 {
+                data_len = (idx - 1) * 255;
+            }
+            data_len += byte as usize;
+            value = &value[(idx + 1)..];
+            break;
+        }
+    }
 
     let mut result = Vec::<u8>::with_capacity(data_len);
 
     let mut last_utf8_prefix: &[u8] = &[];
 
-    while !value.is_empty() {
+    'heart: while !value.is_empty() {
         let utf8_value = utf8::Value::from(value);
-        let utf8_unicode = utf8_value.unicode();
         let (utf8_len, utf8_char): (usize, u8);
         
-        if utf8_unicode == utf8::Unicode::Unknown {
-            // We have found a utf8::Unicode::Unknown,
-            // which means we have a character with the same last prefix.
+        match utf8_value.unicode() {
+            utf8::Unicode::Unknown => {
+                // We have found a utf8::Unicode::Unknown,
+                // which means we have a character with the same last prefix.
 
-            if last_utf8_prefix.is_empty() {
-                // Should only happen if there was no set for the first non-ASCII character,
-                // as in this example: &[ 72, 101, 108, 108, 111, 32, 149 ]
-                //                                                    ^ Non-ASCII character without a prefix.
-                let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
-                return Err(DecompressError::MissingPrefix(err_result));
-            }
-
-            utf8_len = 1;
-            utf8_char = value[0];
-        } else {
-            if utf8_unicode == utf8::Unicode::Range00000_0007F {
-                if handle_ascii(&mut value, &mut result) {
-                    break;
+                if last_utf8_prefix.is_empty() {
+                    // Should only happen if there was no set for the first non-ASCII character,
+                    // as in this example: &[ 72, 101, 108, 108, 111, 32, 149 ]
+                    //                                                    ^ Non-ASCII character without a prefix.
+                    let err_result = value.iter().take(utf8::MAX_UTF8_BYTES).copied().collect::<Vec<u8>>();
+                    return Err(DecompressError::MissingPrefix(err_result));
                 }
-                continue;
-            }
 
-            utf8_len = utf8_value.len();
-            utf8_char = utf8_value.char();
-            last_utf8_prefix = utf8_value.prefix();
+                utf8_len = 1;
+                utf8_char = value[0];
+            },
+            utf8::Unicode::Range00000_0007F => {
+                if handle_ascii(&mut value, &mut result) {
+                    // No characters left.
+                    break 'heart;
+                }
+                continue 'heart;
+            },
+            _ => {
+                utf8_len = utf8_value.len();
+                utf8_char = utf8_value.char();
+                last_utf8_prefix = utf8_value.prefix();
+            }
         }
 
         result.extend_from_slice(last_utf8_prefix);
         result.push(utf8_char);
-        // We can use the unsafe function `get_unchecked`,
-        // because we know that `value` is at least `utf8_len` long.
-        unsafe {
-            value = value.get_unchecked(utf8_len..);
-        }
+        // We can use `unsafe` here because we know the length.
+        value = unsafe { value.get_unchecked(utf8_len..) };
     }
     
     Ok(result)
