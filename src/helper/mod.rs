@@ -42,7 +42,7 @@ where
 /// Returns the index of the first byte that has the sign bit set to `1` (value greater than 127), otherwise `None`.
 pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
     #[cfg(feature = "simd")]
-    return { 
+    return {
         let (len, mut skip) = (bytes.len(), 0);
         let mut fpbi = simd::FindPositiveByteIndex::from((bytes, &mut skip));
 

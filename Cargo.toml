@@ -1,13 +1,16 @@
 [package]
 name = "utf-c"
-version = "0.2.0"
 authors = ["Nick Ilhan Atamgüc <nickatamguec@outlook.com>"]
-edition = "2024"
-rust-version = "1.85.0"
-description = "A very small and simple compression for UTF-8"
-repository = "https://github.com/utf-c/rust"
 license = "MIT"
-keywords = ["utf8", "utf-8", "utfc", "utf-c", "compression"]
+
+version = "1.0.0"
+rust-version = "1.85.0"
+edition = "2024"
+
+description = "A small and simple compression for UTF-8 texts"
+repository = "https://github.com/utf-c/rust"
+homepage = "https://utf-c.com"
+keywords = ["utf", "utf8", "utf-8", "utfc", "compression"]
 categories = ["compression"]
 exclude = [".github/", ".cargo/"]
 

@@ -29,7 +29,7 @@ impl<'a> Value<'a> {
     }
     
     #[inline]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self.1 {
             Unicode::Unknown => 0,
             Unicode::Range00000_0007F => 1,
