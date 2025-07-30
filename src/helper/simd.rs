@@ -29,11 +29,11 @@ pub struct FindPositiveByteIndex<'a, 'b> {
 }
 
 impl FindPositiveByteIndex<'_, '_> {
-    pub const VEC_LEN: usize = 16;
-    #[cfg(feature = "simd_extra")]
-    pub const VEC_LEN_EXTRA: usize = 32;
-    #[cfg(feature = "simd_ultra")]
-    pub const VEC_LEN_ULTRA: usize = 64;
+    pub const VEC_LEN_LEVEL1: usize = 16;
+    #[cfg(feature = "simd_l2")]
+    pub const VEC_LEN_LEVEL2: usize = 32;
+    #[cfg(feature = "simd_l3")]
+    pub const VEC_LEN_LEVEL3: usize = 64;
 
     fn r#loop<T, F>(&mut self, vec_len: usize, mask_cb: F) -> Option<usize> 
     where 
@@ -58,11 +58,11 @@ impl FindPositiveByteIndex<'_, '_> {
     }
 
     pub unsafe fn normal(&mut self) -> Option<usize> {
-        if !feature_detected!(normal) {
+        if !feature_detected!(level1) {
             return None;
         }
 
-        self.r#loop(Self::VEC_LEN, |&idx, ptr| {
+        self.r#loop(Self::VEC_LEN_LEVEL1, |&idx, ptr| {
             #[cfg(target_feature = "sse2")]
             unsafe {
                 let simd_vec = x86::_mm_loadu_si128(ptr.add(idx) as *const x86::__m128i);
@@ -77,17 +77,17 @@ impl FindPositiveByteIndex<'_, '_> {
         })
     }
 
-    #[cfg(feature = "simd_extra")]
+    #[cfg(feature = "simd_l2")]
     pub unsafe fn extra(&mut self) -> Option<usize> {
         #[cfg(not(target_feature = "avx2"))]
-        compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_extra\" feature for \"utf-c\"!");
+        compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_l2\" feature for \"utf-c\"!");
 
-        if !feature_detected!(extra) {
+        if !feature_detected!(level2) {
             return None;
         }
 
-        self.r#loop(Self::VEC_LEN_EXTRA, |&idx, ptr| {
-            #[cfg(feature = "simd_extra")]
+        self.r#loop(Self::VEC_LEN_LEVEL2, |&idx, ptr| {
+            #[cfg(feature = "simd_l2")]
             unsafe {
                 let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
                 x86::_mm256_movemask_epi8(simd_vec)
@@ -95,17 +95,17 @@ impl FindPositiveByteIndex<'_, '_> {
         })
     }
 
-    #[cfg(feature = "simd_ultra")]
+    #[cfg(feature = "simd_l3")]
     pub unsafe fn ultra(&mut self) -> Option<usize> {
         #[cfg(not(target_feature = "avx512f"))]
-        compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_ultra\" feature for \"utf-c\"!");
+        compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_l3\" feature for \"utf-c\"!");
 
-        if !feature_detected!(extra) {
+        if !feature_detected!(level3) {
             return None;
         }
 
-        self.r#loop(Self::VEC_LEN_ULTRA, |&idx, ptr| {
-            #[cfg(feature = "simd_ultra")]
+        self.r#loop(Self::VEC_LEN_LEVEL3, |&idx, ptr| {
+            #[cfg(feature = "simd_l3")]
             unsafe {
                 let simd_vec = x86::_mm512_loadu_si512(ptr.add(idx) as *const x86::__m512i);
                 x86::_mm512_movepi8_mask(simd_vec)
@@ -193,7 +193,7 @@ mod tests {
             let value = unsafe { fpbi.normal() };
             assert_eq!(value, Some(result.1), "failed at index {}", idx);
 
-            #[cfg(feature = "simd_extra")]
+            #[cfg(feature = "simd_l2")]
             {
                 let value = unsafe { fpbi.extra() };
                 assert_eq!(value, Some(result.1), "failed at index {}", idx);

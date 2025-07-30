@@ -1,4 +1,4 @@
-#[cfg(feature = "simd")]
+#[cfg(feature = "simd_l1")]
 mod simd;
 
 /// This function uses SIMD (if the feature is enabled, otherwise a normal loop is used) to find a non-ASCII character 
@@ -41,28 +41,28 @@ where
 /// 
 /// Returns the index of the first byte that has the sign bit set to `1` (value greater than 127), otherwise `None`.
 pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
-    #[cfg(feature = "simd")]
+    #[cfg(feature = "simd_l1")]
     return {
         let (len, mut skip) = (bytes.len(), 0);
         let mut fpbi = simd::FindPositiveByteIndex::from((bytes, &mut skip));
 
-        #[cfg(feature = "simd_ultra")]
-        if len >= simd::FindPositiveByteIndex::VEC_LEN_ULTRA {
+        #[cfg(feature = "simd_l3")]
+        if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL3 {
             let result = unsafe { fpbi.ultra() };
             if result.is_some() {
                 return result;
             }
         }
 
-        #[cfg(feature = "simd_extra")]
-        if len >= simd::FindPositiveByteIndex::VEC_LEN_EXTRA {
+        #[cfg(feature = "simd_l2")]
+        if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL2 {
             let result = unsafe { fpbi.extra() };
             if result.is_some() {
                 return result;
             }
         }
 
-        if len >= simd::FindPositiveByteIndex::VEC_LEN {
+        if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL1 {
             let result = unsafe { fpbi.normal() };
             if result.is_some() {
                 return result;
@@ -73,7 +73,7 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
         (skip..len).find(|&i| test_sign_bit(bytes[i]))
     };
 
-    #[cfg(not(feature = "simd"))]
+    #[cfg(not(feature = "simd_l1"))]
     return bytes.iter().position(|b| test_sign_bit(*b));
 }
 

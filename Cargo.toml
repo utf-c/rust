@@ -20,13 +20,13 @@ exclude = [".github/", ".cargo/"]
 criterion = { version = "0.5.1", default-features = false, features = ["cargo_bench_support"] }
 
 [features]
-default = ["simd"]
-# Use SSE2 or NEON
-simd = []
-# Use AVX2 (Requires the "simd" feature)
-simd_extra = []
-# Use AVX512 (Requires the "simd" feature)
-simd_ultra = []
+default = ["simd_l1"]
+# Level 1: 128-bit SIMD (SSE2, NEON)
+simd_l1 = []
+# Level 2: 256-bit SIMD (AVX2)
+simd_l2 = ["simd_l1"]
+# Level 3: 512-bit SIMD (AVX512)
+simd_l3 = ["simd_l2"]
 
 [[bench]]
 name = "bench"

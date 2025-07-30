@@ -20,18 +20,18 @@ macro_rules! init_features {
 init_features! {
     @MACRO: is_x86_feature_detected;
     @FEATURE: 
-        normal: "sse2";
+        level1: "sse2";
     @FEATURE: 
-        extra: "avx2";
+        level2: "avx2";
     @FEATURE: 
-        ultra: "avx512f";
+        level3: "avx512f";
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
 init_features! {
     @MACRO: is_aarch64_feature_detected;
     @FEATURE: 
-        normal: "neon";
+        level1: "neon";
 }
 
 /// Macro for easy implementation of `MaskValue` for given types.
