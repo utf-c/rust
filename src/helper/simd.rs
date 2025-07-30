@@ -17,6 +17,12 @@ compile_error!("The current arch is not supported. Please disable the \"simd\" f
 )))]
 compile_error!("The required feature for SIMD are not available. Please disable the \"simd\" feature for \"utf-c\"!");
 
+pub trait MaskValue: PartialEq + Default {
+    /// Calls the `trailing_zeros` function of this type.
+    fn trailing_zeros(self) -> u32;
+}
+impl_mask_value!(u16, i32, u64);
+
 pub struct FindPositiveByteIndex<'a, 'b> {
     bytes: &'a [u8],
     index: &'b mut usize,
@@ -26,19 +32,21 @@ impl FindPositiveByteIndex<'_, '_> {
     pub const VEC_LEN: usize = 16;
     #[cfg(feature = "simd_extra")]
     pub const VEC_LEN_EXTRA: usize = 32;
+    #[cfg(feature = "simd_ultra")]
+    pub const VEC_LEN_ULTRA: usize = 64;
 
     fn r#loop<T, F>(&mut self, vec_len: usize, mask_cb: F) -> Option<usize> 
     where 
-        T: Into<i32>,
+        T: MaskValue,
         F: Fn(&usize, *const u8) -> T,
     {
         let (len, ptr) = (self.bytes.len(), self.bytes.as_ptr());
         let end_idx = len - vec_len;
 
         while *self.index <= end_idx {
-            let mask = mask_cb(self.index, ptr).into();
+            let mask = mask_cb(self.index, ptr);
 
-            if mask != 0 {
+            if mask != T::default() {
                 let result = *self.index + (mask.trailing_zeros() as usize);
                 return Some(result);
             }
@@ -83,6 +91,24 @@ impl FindPositiveByteIndex<'_, '_> {
             unsafe {
                 let simd_vec = x86::_mm256_loadu_si256(ptr.add(idx) as *const x86::__m256i);
                 x86::_mm256_movemask_epi8(simd_vec)
+            }
+        })
+    }
+
+    #[cfg(feature = "simd_ultra")]
+    pub unsafe fn ultra(&mut self) -> Option<usize> {
+        #[cfg(not(target_feature = "avx512f"))]
+        compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_ultra\" feature for \"utf-c\"!");
+
+        if !feature_detected!(extra) {
+            return None;
+        }
+
+        self.r#loop(Self::VEC_LEN_ULTRA, |&idx, ptr| {
+            #[cfg(feature = "simd_ultra")]
+            unsafe {
+                let simd_vec = x86::_mm512_loadu_si512(ptr.add(idx) as *const x86::__m512i);
+                x86::_mm512_movepi8_mask(simd_vec)
             }
         })
     }

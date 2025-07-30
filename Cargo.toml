@@ -4,7 +4,7 @@ authors = ["Nick Ilhan Atamgüc <nickatamguec@outlook.com>"]
 license = "MIT"
 
 version = "1.0.0"
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 edition = "2024"
 
 description = "A small and simple compression for UTF-8 texts"
@@ -25,6 +25,8 @@ default = ["simd"]
 simd = []
 # Use AVX2 (Requires the "simd" feature)
 simd_extra = []
+# Use AVX512 (Requires the "simd" feature)
+simd_ultra = []
 
 [[bench]]
 name = "bench"

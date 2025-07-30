@@ -23,6 +23,8 @@ init_features! {
         normal: "sse2";
     @FEATURE: 
         extra: "avx2";
+    @FEATURE: 
+        ultra: "avx512f";
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
@@ -30,4 +32,20 @@ init_features! {
     @MACRO: is_aarch64_feature_detected;
     @FEATURE: 
         normal: "neon";
+}
+
+/// Macro for easy implementation of `MaskValue` for given types.
+macro_rules! impl_mask_value {
+    (
+        $($t:ty),*
+    ) => {
+        $(
+            impl crate::helper::simd::MaskValue for $t {
+                #[inline]
+                fn trailing_zeros(self) -> u32 {
+                    self.trailing_zeros()
+                }
+            }
+        )*
+    };
 }

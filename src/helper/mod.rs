@@ -46,6 +46,14 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
         let (len, mut skip) = (bytes.len(), 0);
         let mut fpbi = simd::FindPositiveByteIndex::from((bytes, &mut skip));
 
+        #[cfg(feature = "simd_ultra")]
+        if len >= simd::FindPositiveByteIndex::VEC_LEN_ULTRA {
+            let result = unsafe { fpbi.ultra() };
+            if result.is_some() {
+                return result;
+            }
+        }
+
         #[cfg(feature = "simd_extra")]
         if len >= simd::FindPositiveByteIndex::VEC_LEN_EXTRA {
             let result = unsafe { fpbi.extra() };
