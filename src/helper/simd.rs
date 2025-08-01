@@ -9,13 +9,13 @@ use core::arch::aarch64 as arm;
     target_arch = "x86", target_arch = "x86_64",
     target_arch = "aarch64", target_arch = "arm64ec",
 )))]
-compile_error!("The current arch is not supported. Please disable the \"simd\" feature for \"utf-c\"!");
+compile_error!("The current arch is not supported. Please disable the \"simd_l1\" feature for \"utf-c\"!");
 
 #[cfg(not(any(
     target_feature = "sse2",
     target_feature = "neon",
 )))]
-compile_error!("The required feature for SIMD are not available. Please disable the \"simd\" feature for \"utf-c\"!");
+compile_error!("The required feature for SIMD are not available. Please disable the \"simd_l1\" feature for \"utf-c\"!");
 
 pub trait MaskValue: PartialEq + Default {
     /// Calls the `trailing_zeros` function of this type.
