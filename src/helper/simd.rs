@@ -57,7 +57,7 @@ impl FindPositiveByteIndex<'_, '_> {
         None
     }
 
-    pub unsafe fn normal(&mut self) -> Option<usize> {
+    pub unsafe fn level1(&mut self) -> Option<usize> {
         if !feature_detected!(level1) {
             return None;
         }
@@ -78,7 +78,7 @@ impl FindPositiveByteIndex<'_, '_> {
     }
 
     #[cfg(feature = "simd_l2")]
-    pub unsafe fn extra(&mut self) -> Option<usize> {
+    pub unsafe fn level2(&mut self) -> Option<usize> {
         #[cfg(not(target_feature = "avx2"))]
         compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_l2\" feature for \"utf-c\"!");
 
@@ -96,7 +96,7 @@ impl FindPositiveByteIndex<'_, '_> {
     }
 
     #[cfg(feature = "simd_l3")]
-    pub unsafe fn ultra(&mut self) -> Option<usize> {
+    pub unsafe fn level3(&mut self) -> Option<usize> {
         #[cfg(not(target_feature = "avx512f"))]
         compile_error!("A required SIMD instruction for your processor is missing. Please disable the \"simd_l3\" feature for \"utf-c\"!");
 
@@ -174,14 +174,26 @@ mod tests {
     #[test]
     fn fpbi_search() {
         for (idx, result) in TEST_CASES.into_iter().enumerate() {
-            let mut skip = 0;
-            let mut fpbi = super::FindPositiveByteIndex::from((result.0, &mut skip));
-            let value = unsafe { fpbi.normal() };
-            assert_eq!(value, Some(result.1), "failed at index {}", idx);
+            {
+                let mut skip = 0;
+                let mut fpbi = super::FindPositiveByteIndex::from((result.0, &mut skip));
+                let value = unsafe { fpbi.level1() };
+                assert_eq!(value, Some(result.1), "failed at index {}", idx);
+            }
 
             #[cfg(feature = "simd_l2")]
             {
-                let value = unsafe { fpbi.extra() };
+                let mut skip = 0;
+                let mut fpbi = super::FindPositiveByteIndex::from((result.0, &mut skip));
+                let value = unsafe { fpbi.level2() };
+                assert_eq!(value, Some(result.1), "failed at index {}", idx);
+            }
+
+            #[cfg(feature = "simd_l3")]
+            {
+                let mut skip = 0;
+                let mut fpbi = super::FindPositiveByteIndex::from((result.0, &mut skip));
+                let value = unsafe { fpbi.level3() };
                 assert_eq!(value, Some(result.1), "failed at index {}", idx);
             }
         }

@@ -48,7 +48,7 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
 
         #[cfg(feature = "simd_l3")]
         if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL3 {
-            let result = unsafe { fpbi.ultra() };
+            let result = unsafe { fpbi.level3() };
             if result.is_some() {
                 return result;
             }
@@ -56,14 +56,14 @@ pub(crate) fn find_pos_byte_idx(bytes: &[u8]) -> Option<usize> {
 
         #[cfg(feature = "simd_l2")]
         if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL2 {
-            let result = unsafe { fpbi.extra() };
+            let result = unsafe { fpbi.level2() };
             if result.is_some() {
                 return result;
             }
         }
 
         if len >= simd::FindPositiveByteIndex::VEC_LEN_LEVEL1 {
-            let result = unsafe { fpbi.normal() };
+            let result = unsafe { fpbi.level1() };
             if result.is_some() {
                 return result;
             }
