@@ -155,8 +155,8 @@ unsafe fn neon_movemask_epu8(value: arm::uint8x16_t) -> u16 {
         {
             let sum_bytes = arm::vreinterpretq_u8_u64(sum64);
             (low, high) = (
-                arm::vgetq_lane_u64(sum_bytes, 7) as u8,
-                arm::vgetq_lane_u64(sum_bytes, 15) as u8
+                arm::vgetq_lane_u8(sum_bytes, 7),
+                arm::vgetq_lane_u8(sum_bytes, 15)
             );
         }
     } // unsafe
